@@ -1,0 +1,3 @@
+[submodule "urdm6300"]
+	path = urdm6300
+	url = https://github.com/membermatters/urdm6300.git
