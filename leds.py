@@ -116,20 +116,22 @@ class Leds:
                 time.sleep_ms(self.loop_speed)
         self.clear()
 
-    def run_single_pulse(self, colour, times=1):
+    def run_single_pulse(self, colour, times=1, fadein=False):
         """[Blocking single LED pulse]
 
         Args:
             colour ([colour enum]): []
             times (int, optional): [number of times to loop]. Defaults to 1.
+            fadein (bool, optional): only fade in
         """
         for i in range(times):
-            for x in list(range(self.min_pulse_brightness, 255)) + list(reversed(range(100, 255))):
+            for x in list(range(self.min_pulse_brightness, 255)) + (list(reversed(range(100, 255))) if not fadein else list()):
                 time.sleep_ms(self.pulse_speed)
                 x = GAMMA_CORRECTION[x]
                 self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
                               GREEN or colour == YELLOW else 0, x if colour == BLUE or colour == PURPLE else 0))
-        self.clear()
+        if not fadein:
+            self.clear()
 
     def start_animation(self, animation, colour):
         """Starts a non blocking animation.
