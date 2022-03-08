@@ -55,16 +55,40 @@ if not wlan.isconnected():
 led_ring.set_all(PURPLE)
 
 websocket = None
-
+sock = None
 led_update = time.ticks_ms()
 last_update = time.ticks_ms()
 time.sleep(1)
 
-# setup our HTTP server
-s = usocket.socket()
-# s.setsockopt(usocket.SOL_SOCKET, usocket.SO_REUSEADDR, 1)
-s.bind(socket.getaddrinfo('0.0.0.0', 80)[0][-1])
-s.listen(2)
+
+def setup_websocket_connection():
+    global websocket, led_ring
+    # try:
+    #     websocket = uwebsockets.client.connect(config.PORTAL_WS_URL)
+    #     version_object = {"version": 1}
+    #     websocket.send(json.dumps(version_object))
+    #     led_ring.run_single_pulse(GREEN)
+
+    # except:
+    #     print("Couldn't connect to websocket!")
+    #     led_ring.run_single_pulse(RED)
+
+
+def setup_http_server():
+    global sock
+
+    try:
+        # setup our HTTP server
+        sock = usocket.socket()
+
+        # s.setsockopt(usocket.SOL_SOCKET, usocket.SO_REUSEADDR, 1)
+        sock.bind(socket.getaddrinfo('0.0.0.0', 80)[0][-1])
+        sock.listen(2)
+        return True
+    except Exception as e:
+        print("Got exception when setting up HTTP server")
+        print(e)
+        return False
 
 
 def client_response(conn):
@@ -83,7 +107,7 @@ def sync_rfid():
     global authorised_rfid_tags
     print("Syncing tags!!")
     response = urequests.get(
-        'https://portal.brisbanemaker.space/api/door/' + str(local_mac) + '/authorised/?secret=' + config.API_SECRET)
+        config.PORTAL_URL + '/api/door/' + str(local_mac) + '/authorised/?secret=' + config.API_SECRET)
 
     json_data = response.json()
 
@@ -97,11 +121,11 @@ def sync_rfid():
 def log_rfid(card_id):
     print("Logging access!!")
 
-    # try:
-    urequests.get(
-        'https://portal.brisbanemaker.space/api/door/' + str(local_mac) + '/check/' + card_id + "/?secret=" + config.API_SECRET)
-    # except:
-    # pass
+    try:
+        urequests.get(
+            config.PORTAL_URL + '/api/door/' + str(local_mac) + '/check/' + card_id + "/?secret=" + config.API_SECRET)
+    except:
+        pass
 
 
 def swipe_success():
@@ -119,6 +143,10 @@ def swipe_success():
     led_ring.run_single_pulse(GREEN, fadeout=True)
     lock.off()
 
+
+# try to set up the http server
+if not setup_http_server():
+    print("FAILED to setup http server on startup :(")
 
 sync_rfid()
 last_rfid_sync = time.ticks_ms()
@@ -144,14 +172,14 @@ while True:
                 websocket.send(json.dumps({"time": time.ticks_ms() / 1000}))
 
             data = websocket.recv()
-            # if data:
-            # TODO handle incoming websocket messages
-            # print(data)
+            if data:
+                # TODO handle incoming websocket messages
+                print(data)
 
-        r, w, err = select((s,), (), (), 1)
+        r, w, err = select((sock,), (), (), 1)
         if r:
             for readable in r:
-                conn, addr = s.accept()
+                conn, addr = sock.accept()
                 request = str(conn.recv(1024))
                 client_response(conn)
                 if request.find('/bump?secret=' + config.API_SECRET):
