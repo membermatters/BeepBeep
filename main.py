@@ -1,123 +1,201 @@
 import json
-from machine import Pin
+from machine import Pin, PWM
 import socket
+import usocket
+from uselect import select
 import network
 import time
-
-# third party modules
-import slimdns
-import uwebsockets.client
+import urequests
 
 # our own modules
 from leds import *
 from urdm6300.urdm6300 import Rdm6300
+import config
 
-FALLBACK_IP = "192.168.1.30"  # fallback IP in case mDNS fails
 BUZZER_PIN = 32  # IO num, not pin num
+LOCK_PIN = 13  # IO num, not pin num
 BUZZER_ENABLE = True
+UNLOCK_DELAY = 5  # seconds to remain unlocked
 
+# setup LED ring
 led_ring = Leds()
 led_ring.set_all(OFF)
-rfid_reader = Rdm6300()
-buzzer = Pin(BUZZER_PIN, Pin.OUT if BUZZER_ENABLE else Pin.IN)
-buzzer.off()
 
+# setup RFID
+rfid_reader = Rdm6300()
+
+# setup buzzer
+buzzer = PWM(Pin(BUZZER_PIN), freq=400, duty=0)
+
+# setup lock output
+lock = Pin(LOCK_PIN, Pin.OUT)
+lock.off()
+
+# setup wifi
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 
-# mdns resolver stuff
-local_addr = None
-server = None
-
+authorised_rfid_tags = list()  # hold our in memory cache of authorised tags
+local_ip = None  # store our local IP address
+local_mac = wlan.config('mac')  # store our mac address
 
 if not wlan.isconnected():
     print('connecting to network...')
     wlan.config(dhcp_hostname="MMController")
-    wlan.connect('Bill Wi The Science Fi', '225261007622')
+    wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
     while not wlan.isconnected():
         led_ring.run_single_wipe(BLUE)
         pass
 
-    # mdns resolver stuff
-    local_addr = wlan.ifconfig()[0]
-    server = slimdns.SlimDNSServer(local_addr, "micropython")
-    print('IP address:', local_addr)
-
-
-def resolve_mdns(host):
-    ip = server.resolve_mdns_address(host)
-
-    if ip:
-        print(slimdns.bytes_to_dotted_ip(ip))
-        return slimdns.bytes_to_dotted_ip(ip)
-    else:
-        return None
-
+    local_ip = wlan.ifconfig()[0]
+    print('Local IP:', local_ip)
+    print('Local MAC:', local_mac)
 
 # set to purple while we're connecting to the websocket
 led_ring.set_all(PURPLE)
 
 websocket = None
-try:
-    ip = resolve_mdns("membermatters.local")
-
-    if not ip:
-        ip = FALLBACK_IP
-
-    websocket = uwebsockets.client.connect("ws://{}:8000/ws/access".format(ip))
-    version_object = {"version": 1}
-    websocket.send(json.dumps(version_object))
-    led_ring.run_single_pulse(GREEN)
-
-except:
-    print("Couldn't connect to websocket!")
-    led_ring.run_single_pulse(RED)
 
 led_update = time.ticks_ms()
 last_update = time.ticks_ms()
 time.sleep(1)
 
-led_ring.animate_idle()
+# setup our HTTP server
+s = usocket.socket()
+# s.setsockopt(usocket.SOL_SOCKET, usocket.SO_REUSEADDR, 1)
+s.bind(socket.getaddrinfo('0.0.0.0', 80)[0][-1])
+s.listen(2)
+
+
+def client_response(conn):
+    response = """
+            {"success": true}
+            """
+
+    conn.send('HTTP/1.1 200 OK\n')
+    conn.send('Content-Type: application/json\n')
+    conn.send('Connection: close\n\n')
+    conn.sendall(response)
+    conn.close()
+
+
+def sync_rfid():
+    global authorised_rfid_tags
+    print("Syncing tags!!")
+    response = urequests.get(
+        'https://portal.brisbanemaker.space/api/door/' + str(local_mac) + '/authorised/?secret=' + config.API_SECRET)
+
+    json_data = response.json()
+
+    if json_data.get("authorised_tags"):
+        authorised_rfid_tags = json_data.get("authorised_tags")
+        print(authorised_rfid_tags)
+
+    print("Syncing tags done!!")
+
+
+def log_rfid(card_id):
+    print("Logging access!!")
+
+    # try:
+    urequests.get(
+        'https://portal.brisbanemaker.space/api/door/' + str(local_mac) + '/check/' + card_id + "/?secret=" + config.API_SECRET)
+    # except:
+    # pass
+
+
+def swipe_success():
+    lock.on()
+    buzzer.duty(512)
+    buzzer.freq(400)
+    time.sleep(0.1)
+    buzzer.freq(1000)
+    time.sleep(0.3)
+    buzzer.duty(0)
+    buzzer.freq(400)
+
+    led_ring.run_single_pulse(GREEN, fadein=True)
+    time.sleep(UNLOCK_DELAY)
+    led_ring.run_single_pulse(GREEN, fadeout=True)
+    lock.off()
+
+
+sync_rfid()
+last_rfid_sync = time.ticks_ms()
 
 print("Starting main loop...")
 while True:
-    if time.ticks_diff(time.ticks_ms(), led_update) >= 10:
-        led_update = time.ticks_ms()
-        led_ring.update_animation()
+    try:
+        # every 10 minutes sync RFID
+        if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 600000:
+            last_rfid_sync = time.ticks_ms()
+            sync_rfid()
 
-    if websocket:
-        if time.ticks_ms() - last_update > 60000:
-            print("sending time")
-            last_update = time.ticks_ms()
-            websocket.send(json.dumps({"time": time.ticks_ms() / 1000}))
+        # every 10ms update the animation
+        if time.ticks_diff(time.ticks_ms(), led_update) >= 10:
+            led_update = time.ticks_ms()
+            led_ring.update_animation()
 
-        data = websocket.recv()
-        if data:
+        # if we have a websocket connection
+        if websocket:
+            if time.ticks_diff(time.ticks_ms(), last_update) > 60000:
+                print("sending time")
+                last_update = time.ticks_ms()
+                websocket.send(json.dumps({"time": time.ticks_ms() / 1000}))
+
+            data = websocket.recv()
+            # if data:
             # TODO handle incoming websocket messages
-            print(data)
+            # print(data)
 
-    card = rfid_reader.read_card()
+        r, w, err = select((s,), (), (), 1)
+        if r:
+            for readable in r:
+                conn, addr = s.accept()
+                request = str(conn.recv(1024))
+                client_response(conn)
+                if request.find('/bump?secret=' + config.API_SECRET):
+                    swipe_success()
+                    break
 
-    if (card):
-        # TODO handle a card scan
-        print(card)
-        buzzer.on()
-        time.sleep(0.1)
-        buzzer.off()
-        led_ring.run_single_loop(BLUE)
-        led_ring.pulse_speed = 10
+        # try to read a card
+        card = rfid_reader.read_card()
 
-        buzzer.on()
-        time.sleep(0.05)
-        buzzer.off()
-        time.sleep(0.05)
-        buzzer.on()
-        time.sleep(0.05)
-        buzzer.off()
+        # if we got a valid card read
+        if (card):
+            print("got a card: " + str(card))
 
-        websocket.send(json.dumps({"card": card}))
+            buzzer.duty(512)
+            time.sleep(0.1)
+            buzzer.duty(0)
 
-        led_ring.run_single_pulse(GREEN)
-        led_ring.animate_idle()
+            if str(card) in authorised_rfid_tags:
+                swipe_success()
 
-    card = None
+            else:
+                led_ring.set_all(BLUE)
+                sync_rfid()
+                if card in authorised_rfid_tags:
+                    swipe_success()
+                else:
+                    buzzer.duty(512)
+                    buzzer.freq(1000)
+                    time.sleep(0.05)
+                    buzzer.duty(0)
+                    time.sleep(0.05)
+                    buzzer.freq(200)
+                    buzzer.duty(512)
+                    time.sleep(0.05)
+                    buzzer.duty(0)
+                    led_ring.run_single_pulse(RED)
+
+            log_rfid(card)
+
+            # dedupe card reads; keep looping until we've cleared the buffer
+            while True:
+                if not rfid_reader.read_card():
+                    break
+
+        card = None
+    except:
+        continue
