@@ -6,6 +6,7 @@ from uselect import select
 import network
 import time
 import urequests
+import ubinascii
 
 # our own modules
 from leds import *
@@ -36,8 +37,22 @@ wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 
 authorised_rfid_tags = list()  # hold our in memory cache of authorised tags
+
+
+try:
+    # if we have any saved tags, load them
+    with open('tags.json') as tags:
+        parsed_tags = json.load(tags)
+        if parsed_tags:
+            authorised_rfid_tags = parsed_tags
+except:
+    print("could not load saved tags")
+
 local_ip = None  # store our local IP address
-local_mac = wlan.config('mac')  # store our mac address
+# store our mac address
+local_mac = ubinascii.hexlify(wlan.config('mac')).decode()
+
+wlan_connecting_start = time.ticks_ms()
 
 if not wlan.isconnected():
     print('connecting to network...')
@@ -45,6 +60,11 @@ if not wlan.isconnected():
     wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
     while not wlan.isconnected():
         led_ring.run_single_wipe(BLUE)
+        if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 30000:
+            print("Took too long to wait for WiFi!")
+            print("Will continue trying to connect in the background.")
+            led_ring.run_single_pulse("red")
+            break
         pass
 
     local_ip = wlan.ifconfig()[0]
@@ -59,6 +79,8 @@ sock = None
 led_update = time.ticks_ms()
 last_update = time.ticks_ms()
 time.sleep(1)
+
+DEVICE_ID = config.DEVICE_ID or local_mac
 
 
 def setup_websocket_connection():
@@ -106,16 +128,26 @@ def client_response(conn):
 def sync_rfid():
     global authorised_rfid_tags
     print("Syncing tags!!")
-    response = urequests.get(
-        config.PORTAL_URL + '/api/door/' + str(local_mac) + '/authorised/?secret=' + config.API_SECRET)
+    response = None
 
-    json_data = response.json()
+    try:
+        response = urequests.get(
+            config.PORTAL_URL + '/api/door/' + DEVICE_ID + '/authorised/?secret=' + config.API_SECRET)
+        json_data = response.json()
+        if json_data.get("authorised_tags"):
+            authorised_rfid_tags = json_data.get("authorised_tags")
+            print(authorised_rfid_tags)
+            # save the tags to flash
+            with open('tags.json', "w") as tags:
+                parsed_tags = json.dump(authorised_rfid_tags, tags)
+                print("saved tags to flash")
 
-    if json_data.get("authorised_tags"):
-        authorised_rfid_tags = json_data.get("authorised_tags")
-        print(authorised_rfid_tags)
+        print("Syncing tags done!")
 
-    print("Syncing tags done!!")
+    except Exception as e:
+        print("Syncing tags FAILED! Exception:")
+        print(e)
+        print(response)
 
 
 def log_rfid(card_id):
@@ -123,7 +155,7 @@ def log_rfid(card_id):
 
     try:
         urequests.get(
-            config.PORTAL_URL + '/api/door/' + str(local_mac) + '/check/' + card_id + "/?secret=" + config.API_SECRET)
+            config.PORTAL_URL + '/api/door/' + DEVICE_ID + '/check/' + card_id + "/?secret=" + config.API_SECRET)
     except:
         pass
 
@@ -139,6 +171,7 @@ def swipe_success():
     buzzer.freq(400)
 
     led_ring.run_single_pulse(GREEN, fadein=True)
+    led_ring.set_all(GREEN)
     time.sleep(UNLOCK_DELAY)
     led_ring.run_single_pulse(GREEN, fadeout=True)
     lock.off()
@@ -154,6 +187,9 @@ last_rfid_sync = time.ticks_ms()
 print("Starting main loop...")
 while True:
     try:
+        if gc.mem_free() < 102000:
+            gc.collect()
+
         # every 10 minutes sync RFID
         if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 600000:
             last_rfid_sync = time.ticks_ms()

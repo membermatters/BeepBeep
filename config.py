@@ -7,6 +7,8 @@ UNLOCK_DELAY = 5  # seconds to remain unlocked
 PORTAL_WS_URL = "ws://portal.brisbanemaker.space:8000/ws/access"
 PORTAL_URL = "https://portal.brisbanemaker.space"
 
+DEVICE_ID = "1"
+
 # Secrets
 API_SECRET = "api_pass"
 WIFI_SSID = 'My WiFi'
