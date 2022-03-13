@@ -6,14 +6,14 @@ from . import Handler
 def try_remove(fn: str) -> None:
     """Try to remove a file if it existst."""
     try:
-        os.remove(fn)
+        uos.remove(fn)
     except OSError:
         pass
 
 
 def get_filesize(fn: str) -> int:
     """Return size of a file."""
-    return os.stat(fn)[6]
+    return uos.stat(fn)[6]
 
 
 class RotatingFileHandler(Handler):
@@ -45,7 +45,7 @@ class RotatingFileHandler(Handler):
             for i in range(self.backupCount - 1, 0, -1):
                 if i < self.backupCount:
                     try:
-                        os.rename(
+                        uos.rename(
                             self.filename + ".{0}".format(i),
                             self.filename + ".{0}".format(i + 1),
                         )
@@ -53,7 +53,7 @@ class RotatingFileHandler(Handler):
                         pass
 
             try:
-                os.rename(self.filename, self.filename + ".1")
+                uos.rename(self.filename, self.filename + ".1")
             except OSError:
                 pass
             self._counter = 0

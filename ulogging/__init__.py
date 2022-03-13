@@ -3,11 +3,11 @@ import sys
 import uio
 
 CRITICAL = 50
-ERROR    = 40
-WARNING  = 30
-INFO     = 20
-DEBUG    = 10
-NOTSET   = 0
+ERROR = 40
+WARNING = 30
+INFO = 20
+DEBUG = 10
+NOTSET = 0
 
 _level_dict = {
     CRITICAL: "CRITICAL",
@@ -105,25 +105,33 @@ def getLogger(name=None):
     _loggers[name] = l
     return l
 
+
 def info(msg, *args):
     getLogger(None).info(msg, *args)
+
 
 def debug(msg, *args):
     getLogger(None).debug(msg, *args)
 
+
 def warning(msg, *args):
     getLogger(None).warning(msg, *args)
 
+
 warn = warning
+
 
 def error(msg, *args):
     getLogger(None).error(msg, *args)
 
+
 def critical(msg, *args):
     getLogger(None).critical(msg, *args)
 
+
 def exception(msg, *args):
     getLogger(None).exception(msg, *args)
+
 
 def basicConfig(level=INFO, filename=None, stream=None, format=None, style="%"):
     root.setLevel(level)
@@ -131,7 +139,8 @@ def basicConfig(level=INFO, filename=None, stream=None, format=None, style="%"):
         h = FileHandler(filename)
     else:
         h = StreamHandler(stream)
-    h.setFormatter(Formatter(format or "%(levelname)s:%(name)s:%(message)s", style=style))
+    h.setFormatter(
+        Formatter(format or "%(levelname)s:%(name)s:%(message)s", style=style))
     root.handlers.clear()
     root.addHandler(h)
 
@@ -155,7 +164,8 @@ class StreamHandler(Handler):
         self.flush()
 
     def flush(self):
-        self._stream.flush()
+        pass
+        # self._stream.flush()
 
 
 class FileHandler(StreamHandler):
