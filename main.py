@@ -21,7 +21,7 @@ logger = ulogging.getLogger("main")
 BUZZER_PIN = 32  # IO num, not pin num
 LOCK_PIN = 13  # IO num, not pin num
 BUZZER_ENABLE = True
-UNLOCK_DELAY = 5  # seconds to remain unlocked
+UNLOCK_DELAY = config.UNLOCK_DELAY  # seconds to remain unlocked
 
 # setup LED ring
 led_ring = Leds()
@@ -112,8 +112,13 @@ def setup_websocket_connection():
         websocket = uwebsockets.client.connect(
             config.PORTAL_WS_URL + "/door/" + DEVICE_SERIAL)
         last_pong = time.ticks_ms()
-        version_object = {"api_secret_key": config.API_SECRET}
-        websocket.send(json.dumps(version_object))
+
+        auth_packet = {"api_secret_key": config.API_SECRET}
+        websocket.send(json.dumps(auth_packet))
+
+        ip_packet = {"command": "ip_address", "ip_address": local_ip}
+        websocket.send(json.dumps(ip_packet))
+
         led_ring.run_single_pulse(GREEN)
 
     except Exception as e:
@@ -151,38 +156,35 @@ def client_response(conn):
     conn.close()
 
 
-def sync_rfid():
+def save_tags(new_tags):
     global authorised_rfid_tags
     logger.info("Syncing tags!!")
-    response = None
 
     try:
-        response = urequests.get(
-            config.PORTAL_URL + '/api/door/' + DEVICE_ID + '/authorised/?secret=' + config.API_SECRET)
-        json_data = response.json()
-        if json_data.get("authorised_tags"):
-            authorised_rfid_tags = json_data.get("authorised_tags")
-            logger.info("Got %s tags!", len(authorised_rfid_tags))
-            # save the tags to flash
-            with open('tags.json', "w") as tags:
-                parsed_tags = json.dump(authorised_rfid_tags, tags)
-                logger.debug("saved tags to flash")
+        authorised_rfid_tags = new_tags
+        logger.info("Got %s tags!", len(authorised_rfid_tags))
+        # save the tags to flash
+        with open('tags.json', "w") as new_tags:
+            parsed_tags = json.dump(authorised_rfid_tags, new_tags)
+            logger.debug("saved tags to flash")
 
         logger.debug("Syncing tags done!")
 
     except Exception as e:
         logger.error("Syncing tags FAILED! Exception:")
         logger.error("%s", e)
-        if response:
-            logger.error("%s", response.text)
 
 
-def log_rfid(card_id):
+def log_rfid(card_id, rejected=False):
     logger.info("Logging access!!")
 
     try:
-        urequests.get(
-            config.PORTAL_URL + '/api/door/' + DEVICE_ID + '/check/' + card_id + "/?secret=" + config.API_SECRET)
+        if rejected:
+            websocket.send(json.dumps(
+                {"command": "log_access_denied", "card_id": card_id}))
+        else:
+            websocket.send(json.dumps(
+                {"command": "log_access", "card_id": card_id}))
     except:
         pass
 
@@ -210,53 +212,57 @@ def swipe_success():
 if not setup_http_server():
     logger.error("FAILED to setup http server on startup :(")
 
-sync_rfid()
 last_rfid_sync = time.ticks_ms()
 
 setup_websocket_connection()
 
 logger.info("Starting main loop...")
 while True:
-    # try:
-    if gc.mem_free() < 102000:
-        gc.collect()
+    try:
+        if gc.mem_free() < 102000:
+            gc.collect()
 
-    # every 10 minutes sync RFID
-    if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 600000:
-        last_rfid_sync = time.ticks_ms()
-        sync_rfid()
+        # every 10 minutes sync RFID
+        if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 600000:
+            last_rfid_sync = time.ticks_ms()
+            websocket.send(json.dumps({"command": "sync"}))
 
-    # every 10ms update the animation
-    if time.ticks_diff(time.ticks_ms(), led_update) >= 10:
-        led_update = time.ticks_ms()
-        led_ring.update_animation()
+        # every 10ms update the animation
+        if time.ticks_diff(time.ticks_ms(), led_update) >= 10:
+            led_update = time.ticks_ms()
+            led_ring.update_animation()
 
-    # every 10 seconds
-    cron_period = 10000
+        # every 10 seconds
+        cron_period = 10000
 
-    if time.ticks_diff(time.ticks_ms(), ten_second_cron_update) > cron_period:
-        ten_second_cron_update = time.ticks_ms()
+        if time.ticks_diff(time.ticks_ms(), ten_second_cron_update) > cron_period:
+            ten_second_cron_update = time.ticks_ms()
+
+            if websocket and websocket.open:
+                logger.debug("sending ping")
+
+                # if we've missed at least 3 consecutive pongs, then reconnect
+                if time.ticks_diff(time.ticks_ms(), last_pong) > cron_period * 4:
+                    websocket = None
+                    logger.info(
+                        "Websocket not open (pong timeout), trying to reconnect.")
+                    setup_websocket_connection()
+                    # skip the rest of this event loop
+                    continue
+
+                try:
+                    websocket.send(json.dumps({"command": "ping"}))
+                except:
+                    websocket = None
+                    setup_websocket_connection()
+                    # skip the rest of this event loop
+                    continue
+
+            else:
+                logger.info("Websocket not open, trying to reconnect.")
+                setup_websocket_connection()
 
         if websocket and websocket.open:
-            logger.debug("sending ping")
-
-            # if we've missed at least 2 consecutive pongs, then reconnect
-            if time.ticks_diff(ten_second_cron_update, last_pong) > cron_period * 3:
-                websocket = None
-                logger.info(
-                    "Websocket not open (pong timeout), trying to reconnect.")
-                setup_websocket_connection()
-                # skip the rest of this event loop
-                continue
-
-            try:
-                websocket.send(json.dumps({"command": "ping"}))
-            except:
-                websocket = None
-                setup_websocket_connection()
-                # skip the rest of this event loop
-                continue
-
             data = websocket.recv()
             if data:
                 logger.debug("Got websocket packet:")
@@ -265,50 +271,56 @@ while True:
                 try:
                     data = json.loads(data)
 
+                    if data.get("authorised") is not None:
+                        logger.info(str(data))
+
                     if data.get("command") == "pong":
                         last_pong = time.ticks_ms()
 
                     if data.get("command") == "bump":
                         swipe_success()
 
+                    if data.get("command") == "sync":
+                        save_tags(data.get("tags"))
+                        logger.info("Saved tags with hash: " +
+                                    data.get("hash"))
+
                 except Exception as e:
                     logger.error("Error parsing JSON websocket packet!")
                     logger.exception(e)
-        else:
-            logger.info("Websocket not open, trying to reconnect.")
-            setup_websocket_connection()
 
-    # backup http server for manually bumping a door from the local network
-    r, w, err = select((sock,), (), (), 1)
-    if r:
-        for readable in r:
-            conn, addr = sock.accept()
-            request = str(conn.recv(1024))
-            client_response(conn)
-            if request.find('/bump?secret=' + config.API_SECRET):
+        # backup http server for manually bumping a door from the local network
+        r, w, err = select((sock,), (), (), 1)
+        if r:
+            for readable in r:
+                conn, addr = sock.accept()
+                request = str(conn.recv(2048))
+                logger.info("got http request!")
+                logger.info(request)
+                client_response(conn)
+                if '/bump?secret=' + config.API_SECRET in request:
+                    logger.info("got authenticated bump request")
+                    swipe_success()
+                    break
+
+        # try to read a card
+        card = rfid_reader.read_card()
+
+        # if we got a valid card read
+        if (card):
+            logger.info("got a card: " + str(card))
+
+            buzzer.duty(512)
+            time.sleep(0.1)
+            buzzer.duty(0)
+
+            if str(card) in authorised_rfid_tags:
                 swipe_success()
-                break
+                log_rfid(card)
 
-    # try to read a card
-    card = rfid_reader.read_card()
-
-    # if we got a valid card read
-    if (card):
-        logger.info("got a card: " + str(card))
-
-        buzzer.duty(512)
-        time.sleep(0.1)
-        buzzer.duty(0)
-
-        if str(card) in authorised_rfid_tags:
-            swipe_success()
-
-        else:
-            led_ring.set_all(BLUE)
-            sync_rfid()
-            if card in authorised_rfid_tags:
-                swipe_success()
             else:
+                websocket.send(json.dumps({"command": "sync"}))
+                log_rfid(card, rejected=True)
                 buzzer.duty(512)
                 buzzer.freq(1000)
                 time.sleep(0.05)
@@ -320,13 +332,14 @@ while True:
                 buzzer.duty(0)
                 led_ring.run_single_pulse(RED)
 
-        log_rfid(card)
+            # dedupe card reads; keep looping until we've cleared the buffer
+            while True:
+                if not rfid_reader.read_card():
+                    break
 
-        # dedupe card reads; keep looping until we've cleared the buffer
-        while True:
-            if not rfid_reader.read_card():
-                break
+        card = None
+    except KeyboardInterrupt as e:
+        raise e
 
-    card = None
-    # except:
-    #     continue
+    except Exception:
+        continue
