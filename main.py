@@ -33,6 +33,15 @@ rfid_reader = Rdm6300()
 # setup buzzer
 buzzer = PWM(Pin(BUZZER_PIN), freq=400, duty=0)
 
+
+buzzer.duty(512)
+buzzer.freq(400)
+
+time.sleep(0.1)
+
+buzzer.duty(0)
+buzzer.freq(400)
+
 # setup lock output
 lock_pin = Pin(LOCK_PIN, Pin.OUT)
 
@@ -119,7 +128,7 @@ def setup_websocket_connection():
         ip_packet = {"command": "ip_address", "ip_address": local_ip}
         websocket.send(json.dumps(ip_packet))
 
-        led_ring.run_single_pulse(GREEN)
+        led_ring.run_single_pulse(GREEN, fadein=True)
 
     except Exception as e:
         logger.error("Couldn't connect to websocket!")
@@ -185,7 +194,9 @@ def log_rfid(card_id, rejected=False):
         else:
             websocket.send(json.dumps(
                 {"command": "log_access", "card_id": card_id}))
-    except:
+    except Exception as e:
+        logger.warn("Exception when logging access!")
+        logger.error(e)
         pass
 
 
@@ -208,6 +219,19 @@ def swipe_success():
     logger.warn("Locking!")
 
 
+def swipe_denied():
+    buzzer.duty(512)
+    buzzer.freq(1000)
+    time.sleep(0.05)
+    buzzer.duty(0)
+    time.sleep(0.05)
+    buzzer.freq(200)
+    buzzer.duty(512)
+    time.sleep(0.05)
+    buzzer.duty(0)
+    led_ring.run_single_pulse(RED, fadein=True)
+
+
 # try to set up the http server
 if not setup_http_server():
     logger.error("FAILED to setup http server on startup :(")
@@ -222,8 +246,8 @@ while True:
         if gc.mem_free() < 102000:
             gc.collect()
 
-        # every 10 minutes sync RFID
-        if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 600000:
+        # every 15 minutes sync RFID
+        if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 900000:
             last_rfid_sync = time.ticks_ms()
             websocket.send(json.dumps({"command": "sync"}))
 
@@ -265,8 +289,8 @@ while True:
         if websocket and websocket.open:
             data = websocket.recv()
             if data:
-                logger.debug("Got websocket packet:")
-                logger.debug(data)
+                logger.info("Got websocket packet:")
+                logger.info(data)
 
                 try:
                     data = json.loads(data)
@@ -278,12 +302,17 @@ while True:
                         last_pong = time.ticks_ms()
 
                     if data.get("command") == "bump":
+                        logger.info("bumping!!")
                         swipe_success()
 
                     if data.get("command") == "sync":
                         save_tags(data.get("tags"))
                         logger.info("Saved tags with hash: " +
                                     data.get("hash"))
+                        led_ring.set_all(
+                            (0, 0, GAMMA_CORRECTION[50]))
+                        time.sleep(0.05)
+                        led_ring.set_all(OFF)
 
                 except Exception as e:
                     logger.error("Error parsing JSON websocket packet!")
@@ -315,22 +344,13 @@ while True:
             buzzer.duty(0)
 
             if str(card) in authorised_rfid_tags:
-                swipe_success()
                 log_rfid(card)
+                swipe_success()
 
             else:
                 websocket.send(json.dumps({"command": "sync"}))
                 log_rfid(card, rejected=True)
-                buzzer.duty(512)
-                buzzer.freq(1000)
-                time.sleep(0.05)
-                buzzer.duty(0)
-                time.sleep(0.05)
-                buzzer.freq(200)
-                buzzer.duty(512)
-                time.sleep(0.05)
-                buzzer.duty(0)
-                led_ring.run_single_pulse(RED)
+                swipe_denied()
 
             # dedupe card reads; keep looping until we've cleared the buffer
             while True:
@@ -341,5 +361,6 @@ while True:
     except KeyboardInterrupt as e:
         raise e
 
-    except Exception:
+    except Exception as e:
+        print(e)
         continue
