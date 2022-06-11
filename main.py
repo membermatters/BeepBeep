@@ -232,9 +232,12 @@ def swipe_denied():
     led_ring.run_single_pulse(RED, fadein=True)
 
 
-# try to set up the http server
-if not setup_http_server():
-    logger.error("FAILED to setup http server on startup :(")
+if config.ENABLE_BACKUP_HTTP_SERVER:
+    # try to set up the http server
+    if not setup_http_server():
+        logger.error("FAILED to setup http server on startup :(")
+else:
+    logger.warning("Backup http server disabled!")
 
 last_rfid_sync = time.ticks_ms()
 
@@ -318,19 +321,20 @@ while True:
                     logger.error("Error parsing JSON websocket packet!")
                     logger.exception(e)
 
-        # backup http server for manually bumping a door from the local network
-        r, w, err = select((sock,), (), (), 1)
-        if r:
-            for readable in r:
-                conn, addr = sock.accept()
-                request = str(conn.recv(2048))
-                logger.info("got http request!")
-                logger.info(request)
-                client_response(conn)
-                if '/bump?secret=' + config.API_SECRET in request:
-                    logger.info("got authenticated bump request")
-                    swipe_success()
-                    break
+        if config.ENABLE_BACKUP_HTTP_SERVER:
+            # backup http server for manually bumping a door from the local network
+            r, w, err = select((sock,), (), (), 1)
+            if r:
+                for readable in r:
+                    conn, addr = sock.accept()
+                    request = str(conn.recv(2048))
+                    logger.info("got http request!")
+                    logger.info(request)
+                    client_response(conn)
+                    if '/bump?secret=' + config.API_SECRET in request:
+                        logger.info("got authenticated bump request")
+                        swipe_success()
+                        break
 
         # try to read a card
         card = rfid_reader.read_card()
