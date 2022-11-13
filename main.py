@@ -1,74 +1,140 @@
-import config
-from urdm6300.urdm6300 import Rdm6300
-from leds import *
-import json
-from machine import Pin, PWM
-import socket
-import usocket
-from uselect import select
+import os
+import uwiegand
 import network
-import time
-import urequests
-import ubinascii
-import uwebsockets.client
+import config
 import ulogging
+from urdm6300.urdm6300 import Rdm6300
+import time
+from machine import Pin, PWM
+import ubinascii
+import json
+import uwebsockets.client
+import usocket
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
 
-# our own modules
+CATCH_ALL_EXCEPTIONS = True
 
-BUZZER_PIN = 32  # IO num, not pin num
-LOCK_PIN = 13  # IO num, not pin num
-BUZZER_ENABLE = True
-UNLOCK_DELAY = config.UNLOCK_DELAY  # seconds to remain unlocked
 
-# setup LED ring
-led_ring = Leds()
-led_ring.set_all(OFF)
+# setup outputs
+buzzer = PWM(Pin(config.BUZZER_PIN), freq=400, duty=0)
+lock_pin = Pin(config.LOCK_PIN, Pin.OUT)
+led = Pin(config.LED_PIN, Pin.OUT)
+
+
+def lock_door():
+    if config.LOCK_REVERSED:
+        lock_pin.on()
+    else:
+        lock_pin.off()
+
+
+def unlock_door():
+    if config.LOCK_REVERSED:
+        lock_pin.off()
+    else:
+        lock_pin.on()
+
+
+def led_on():
+    if config.LED_REVERSED:
+        led.off()
+    else:
+        led.on()
+
+
+def led_off():
+    if config.LED_REVERSED:
+        led.on()
+    else:
+        led.off()
+
+
+def buzzer_on():
+    if config.BUZZER_ENABLE:
+        buzzer.duty(0)
+
+
+def buzzer_off():
+    if config.BUZZER_ENABLE:
+        buzzer.duty(1023)
+
+
+def buzz_alert():
+    buzzer_on()
+    led_on()
+    time.sleep(0.2)
+
+    buzzer_off()
+    led_off()
+    time.sleep(0.2)
+
+    buzzer_on()
+    led_on()
+    time.sleep(0.2)
+
+    buzzer_off()
+    led_off()
+
+
+def buzz_ok():
+    buzzer_on()
+    led_on()
+
+    time.sleep(1)
+
+    led_off()
+    buzzer_off()
+
+
+def led_alert():
+    led_on()
+    time.sleep(0.2)
+
+    led_off()
+    time.sleep(0.2)
+
+    led_on()
+    time.sleep(0.2)
+
+    led_off()
+
+
+def led_ok():
+    led_on()
+
+    time.sleep(1)
+
+    led_off()
+
+
+# setup is starting
+buzz_alert()
 
 # setup RFID
-rfid_reader = Rdm6300()
-
-# setup buzzer
-buzzer = PWM(Pin(BUZZER_PIN), freq=400, duty=0)
-
-
-buzzer.duty(512)
-buzzer.freq(400)
-
-time.sleep(0.1)
-
-buzzer.duty(0)
-buzzer.freq(400)
-
-# setup lock output
-lock_pin = Pin(LOCK_PIN, Pin.OUT)
+if config.WIEGAND_ENABLED:
+    # setup wiegand reader
+    rfid_reader = uwiegand.Wiegand(config.WIEGAND_ZERO, config.WIEGAND_ONE)
+else:
+    rfid_reader = Rdm6300()
 
 
-def locked():
-    if config.LOCK_REVERSED:
-        lock_pin.on()
-    else:
-        lock_pin.off()
-
-
-def unlocked():
-    if config.LOCK_REVERSED:
-        lock_pin.off()
-    else:
-        lock_pin.on()
-
-
-# setup wifi
-wlan = network.WLAN(network.STA_IF)
-wlan.active(True)
-
-authorised_rfid_tags = list()  # hold our in memory cache of authorised tags
+def file_or_dir_exists(filename):
+    try:
+        os.stat(filename)
+        return True
+    except OSError:
+        return False
 
 
 try:
-    # if we have any saved tags, load them
+    # create it if it doesn't exist
+    if not file_or_dir_exists("tags.json"):
+        with open('tags.json', "w") as new_tags:
+            json.dump([], new_tags)
+
+        # if we have any saved tags, load them
     with open('tags.json') as tags:
         parsed_tags = json.load(tags)
         if parsed_tags:
@@ -76,48 +142,65 @@ try:
             logger.info("Loaded %s saved tags from flash.",
                         len(authorised_rfid_tags))
 except:
-    logger.error("Could not load saved tags")
+    logger.error("Could not load saved tags (unhandled error)")
 
+
+# setup wifi
+wlan = network.WLAN(network.STA_IF)
 local_ip = None  # store our local IP address
-# store our mac address
-local_mac = ubinascii.hexlify(wlan.config('mac')).decode()
+local_mac = ubinascii.hexlify(wlan.config(
+    'mac')).decode()  # store our mac address
+
+wlan.active(True)
+wlan.config(dhcp_hostname="MM_Controller_" + local_mac)
 
 wlan_connecting_start = time.ticks_ms()
+led_toggle_last_update = time.ticks_ms()
+led_toggle_last_state = False
 
 if not wlan.isconnected():
     logger.info('connecting to network...')
-    wlan.config(dhcp_hostname="MMController")
     wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
     while not wlan.isconnected():
-        led_ring.run_single_wipe(BLUE)
         if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 30000:
             logger.warn("Took too long to wait for WiFi!")
-            logger.warn("Will continue trying to connect in the background.")
-            led_ring.run_single_pulse("red")
+            logger.warn(
+                "The ESP32 should continue trying to connect in the background.")
+            buzz_alert()
+            buzz_alert()
             break
-        pass
+
+        if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
+            led_toggle_last_update = time.ticks_ms()
+
+            if led_toggle_last_state:
+                led_off()
+                led_toggle_last_state = False
+
+            else:
+                led_on()
+                led_toggle_last_state = True
+
+    led_off()
 
     local_ip = wlan.ifconfig()[0]
     logger.info('Local IP: ' + local_ip)
     logger.info('Local MAC: ' + local_mac)
 
-# set to purple while we're connecting to the websocket
-led_ring.set_all(PURPLE)
 
 websocket = None
 sock = None
 led_update = time.ticks_ms()
 ten_second_cron_update = time.ticks_ms()
 last_pong = None
-time.sleep(1)
 
-DEVICE_ID = config.DEVICE_ID or local_mac
 DEVICE_SERIAL = local_mac
 
 
 def setup_websocket_connection():
     global websocket, led_ring, last_pong
     try:
+        logger.info("setting up websocket")
         websocket = uwebsockets.client.connect(
             config.PORTAL_WS_URL + "/door/" + DEVICE_SERIAL)
         last_pong = time.ticks_ms()
@@ -128,12 +211,13 @@ def setup_websocket_connection():
         ip_packet = {"command": "ip_address", "ip_address": local_ip}
         websocket.send(json.dumps(ip_packet))
 
-        led_ring.run_single_pulse(GREEN, fadein=True)
+        led_ok()
 
     except Exception as e:
         logger.error("Couldn't connect to websocket!")
         logger.error(str(e))
-        led_ring.run_single_pulse(RED)
+
+        led_alert()
 
 
 def setup_http_server():
@@ -149,7 +233,7 @@ def setup_http_server():
         return True
     except Exception as e:
         logger.error("Got exception when setting up HTTP server")
-        logger.error(e)
+        logger.error(str(e))
         return False
 
 
@@ -181,7 +265,7 @@ def save_tags(new_tags):
 
     except Exception as e:
         logger.error("Syncing tags FAILED! Exception:")
-        logger.error("%s", e)
+        logger.error(str(e))
 
 
 def log_rfid(card_id, rejected=False):
@@ -202,34 +286,18 @@ def log_rfid(card_id, rejected=False):
 
 def swipe_success():
     logger.warn("Unlocking!")
-    unlocked()
-    buzzer.duty(512)
-    buzzer.freq(400)
-    time.sleep(0.1)
-    buzzer.freq(1000)
-    time.sleep(0.3)
-    buzzer.duty(0)
-    buzzer.freq(400)
+    unlock_door()
+    buzz_ok()
 
-    led_ring.run_single_pulse(GREEN, fadein=True)
-    led_ring.set_all(GREEN)
-    time.sleep(UNLOCK_DELAY)
-    led_ring.run_single_pulse(GREEN, fadeout=True)
-    locked()
+    led_on()
+    time.sleep(config.UNLOCK_DELAY)
+    led_off()
+    lock_door()
     logger.warn("Locking!")
 
 
 def swipe_denied():
-    buzzer.duty(512)
-    buzzer.freq(1000)
-    time.sleep(0.05)
-    buzzer.duty(0)
-    time.sleep(0.05)
-    buzzer.freq(200)
-    buzzer.duty(512)
-    time.sleep(0.05)
-    buzzer.duty(0)
-    led_ring.run_single_pulse(RED, fadein=True)
+    buzz_alert()
 
 
 if config.ENABLE_BACKUP_HTTP_SERVER:
@@ -244,20 +312,13 @@ last_rfid_sync = time.ticks_ms()
 setup_websocket_connection()
 
 logger.info("Starting main loop...")
+
 while True:
     try:
-        if gc.mem_free() < 102000:
-            gc.collect()
-
         # every 15 minutes sync RFID
         if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 900000:
             last_rfid_sync = time.ticks_ms()
             websocket.send(json.dumps({"command": "sync"}))
-
-        # every 10ms update the animation
-        if time.ticks_diff(time.ticks_ms(), led_update) >= 10:
-            led_update = time.ticks_ms()
-            led_ring.update_animation()
 
         # every 10 seconds
         cron_period = 10000
@@ -312,14 +373,11 @@ while True:
                         save_tags(data.get("tags"))
                         logger.info("Saved tags with hash: " +
                                     data.get("hash"))
-                        led_ring.set_all(
-                            (0, 0, GAMMA_CORRECTION[50]))
-                        time.sleep(0.05)
-                        led_ring.set_all(OFF)
+                        led_ok()
 
                 except Exception as e:
                     logger.error("Error parsing JSON websocket packet!")
-                    logger.exception(e)
+                    logger.error(str(e))
 
         if config.ENABLE_BACKUP_HTTP_SERVER:
             # backup http server for manually bumping a door from the local network
@@ -339,7 +397,6 @@ while True:
         # try to read a card
         card = rfid_reader.read_card()
 
-        # if we got a valid card read
         if (card):
             logger.info("got a card: " + str(card))
 
@@ -348,13 +405,17 @@ while True:
             buzzer.duty(0)
 
             if str(card) in authorised_rfid_tags:
-                log_rfid(card)
+                # if there's an issue logging the swipe, open the door anyway
+                try:
+                    log_rfid(card)
+                except:
+                    pass
                 swipe_success()
 
             else:
                 websocket.send(json.dumps({"command": "sync"}))
-                log_rfid(card, rejected=True)
                 swipe_denied()
+                log_rfid(card, rejected=True)
 
             # dedupe card reads; keep looping until we've cleared the buffer
             while True:
@@ -362,9 +423,18 @@ while True:
                     break
 
         card = None
+
     except KeyboardInterrupt as e:
         raise e
 
     except Exception as e:
-        print(e)
-        continue
+        # turn off the LED and buzzer in case they were left on
+        led_off()
+        buzzer_off()
+
+        if CATCH_ALL_EXCEPTIONS:
+            print("excepted :( ")
+            print(e)
+            continue
+        else:
+            raise e
