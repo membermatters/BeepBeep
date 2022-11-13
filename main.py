@@ -15,12 +15,61 @@ ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
 
 CATCH_ALL_EXCEPTIONS = True
-
+STATE = {
+    "locked_out": False
+}
 
 # setup outputs
 buzzer = PWM(Pin(config.BUZZER_PIN), freq=400, duty=0)
 lock_pin = Pin(config.LOCK_PIN, Pin.OUT)
 led = Pin(config.LED_PIN, Pin.OUT)
+
+
+def file_or_dir_exists(filename):
+    try:
+        os.stat(filename)
+        return True
+    except OSError:
+        return False
+
+
+def save_state(state):
+    global STATE
+    logger.info("Saving STATE!!")
+
+    STATE = state  # update the in memory state
+
+    try:
+        # save the state to flash
+        with open('state.json', "w") as state_file:
+            json.dump(state, state_file)
+            logger.debug("saved state to flash")
+        return True
+
+    except Exception as e:
+        logger.error("Saving STATE FAILED! Exception:")
+        logger.error(str(e))
+        return False
+
+
+def get_state():
+    global STATE
+    try:
+        # create it if it doesn't exist
+        if not file_or_dir_exists("state.json"):
+            with open('state.json', "w") as state_file:
+                json.dump(STATE, state_file)
+
+        with open('state.json') as state_file:
+            STATE = json.load(state_file)
+            if STATE:
+                logger.info("Loaded saved STATE from flash.")
+            return STATE
+
+    except Exception as e:
+        logger.error("Could not load saved STATE (unhandled error)")
+        logger.error(str(e))
+        return False
 
 
 def lock_door():
@@ -89,15 +138,6 @@ def buzz_ok():
 
 
 def led_alert():
-    led_on()
-    time.sleep(0.2)
-
-    led_off()
-    time.sleep(0.2)
-
-    led_on()
-    time.sleep(0.2)
-
     led_off()
 
 
@@ -111,6 +151,7 @@ def led_ok():
 
 # setup is starting
 buzz_alert()
+get_state()  # grab the state from the flash
 
 # setup RFID
 if config.WIEGAND_ENABLED:
@@ -118,14 +159,6 @@ if config.WIEGAND_ENABLED:
     rfid_reader = uwiegand.Wiegand(config.WIEGAND_ZERO, config.WIEGAND_ONE)
 else:
     rfid_reader = Rdm6300()
-
-
-def file_or_dir_exists(filename):
-    try:
-        os.stat(filename)
-        return True
-    except OSError:
-        return False
 
 
 try:
@@ -166,8 +199,7 @@ if not wlan.isconnected():
             logger.warn("Took too long to wait for WiFi!")
             logger.warn(
                 "The ESP32 should continue trying to connect in the background.")
-            buzz_alert()
-            buzz_alert()
+            led_off()
             break
 
         if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
@@ -258,7 +290,7 @@ def save_tags(new_tags):
         logger.info("Got %s tags!", len(authorised_rfid_tags))
         # save the tags to flash
         with open('tags.json', "w") as new_tags:
-            parsed_tags = json.dump(authorised_rfid_tags, new_tags)
+            json.dump(authorised_rfid_tags, new_tags)
             logger.debug("saved tags to flash")
 
         logger.debug("Syncing tags done!")
@@ -268,13 +300,16 @@ def save_tags(new_tags):
         logger.error(str(e))
 
 
-def log_rfid(card_id, rejected=False):
+def log_rfid(card_id, rejected=False, locked_out=False):
     logger.info("Logging access!!")
 
     try:
         if rejected:
             websocket.send(json.dumps(
                 {"command": "log_access_denied", "card_id": card_id}))
+        elif locked_out:
+            websocket.send(json.dumps(
+                {"command": "log_access_locked_out", "card_id": card_id}))
         else:
             websocket.send(json.dumps(
                 {"command": "log_access", "card_id": card_id}))
@@ -373,6 +408,11 @@ while True:
                         save_tags(data.get("tags"))
                         logger.info("Saved tags with hash: " +
                                     data.get("hash"))
+
+                    if data.get("command") == "update_door_locked_out":
+                        STATE["locked_out"] = data.get("locked_out")
+                        save_state(STATE)
+
                         led_ok()
 
                 except Exception as e:
@@ -405,17 +445,28 @@ while True:
             buzzer.duty(0)
 
             if str(card) in authorised_rfid_tags:
-                # if there's an issue logging the swipe, open the door anyway
-                try:
-                    log_rfid(card)
-                except:
-                    pass
-                swipe_success()
+                if STATE["locked_out"]:
+                    try:
+                        log_rfid(card, locked_out=True)
+                    except:
+                        pass
+                    swipe_denied()
+
+                else:
+                    # if there's an issue logging the swipe, open the door anyway
+                    try:
+                        log_rfid(card)
+                    except:
+                        pass
+                    swipe_success()
 
             else:
-                websocket.send(json.dumps({"command": "sync"}))
+                try:
+                    websocket.send(json.dumps({"command": "sync"}))
+                    log_rfid(card, rejected=True)
+                except:
+                    pass
                 swipe_denied()
-                log_rfid(card, rejected=True)
 
             # dedupe card reads; keep looping until we've cleared the buffer
             while True:
