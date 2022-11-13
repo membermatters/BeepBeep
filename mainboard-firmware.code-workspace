@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "serial://dev/tty.usbserial-10",
+			"uri": "serial:///dev/tty.usbserial-10/"
+		}
+	],
+	"settings": {}
+}

@@ -15,3 +15,4 @@ DEVICE_ID = "1"
 API_SECRET = "api_pass"
 WIFI_SSID = 'My WiFi'
 WIFI_PASS = 'pass'
+ENABLE_WEBREPL = False
