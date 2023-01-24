@@ -21,7 +21,7 @@ STATE = {
 
 # setup outputs
 buzzer = PWM(Pin(config.BUZZER_PIN), freq=400, duty=0)
-lock_pin = Pin(config.LOCK_PIN, Pin.OUT)
+lock_pin = Pin(config.LOCK_PIN, Pin.OUT, value=config.LOCK_REVERSED)
 led = Pin(config.LED_PIN, Pin.OUT)
 
 
