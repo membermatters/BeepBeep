@@ -10,6 +10,10 @@ import ubinascii
 import json
 import uwebsockets.client
 import usocket
+from machine import WDT
+wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 2000)
+wdt.feed()
+import uselect
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
@@ -21,7 +25,7 @@ STATE = {
 
 # setup outputs
 buzzer = PWM(Pin(config.BUZZER_PIN), freq=400, duty=0)
-lock_pin = Pin(config.LOCK_PIN, Pin.OUT)
+lock_pin = Pin(config.LOCK_PIN, Pin.OUT, value=config.LOCK_REVERSED)
 led = Pin(config.LED_PIN, Pin.OUT)
 
 
@@ -185,7 +189,7 @@ local_mac = ubinascii.hexlify(wlan.config(
     'mac')).decode()  # store our mac address
 
 wlan.active(True)
-wlan.config(dhcp_hostname="MM_Controller_" + local_mac)
+wlan.config(dhcp_hostname="MM_Controller_" + local_mac, txpower=8.5)
 
 wlan_connecting_start = time.ticks_ms()
 led_toggle_last_update = time.ticks_ms()
@@ -203,6 +207,7 @@ if not wlan.isconnected():
             break
 
         if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
+            wdt.feed()
             led_toggle_last_update = time.ticks_ms()
 
             if led_toggle_last_state:
@@ -260,7 +265,7 @@ def setup_http_server():
         sock = usocket.socket()
 
         # s.setsockopt(usocket.SOL_SOCKET, usocket.SO_REUSEADDR, 1)
-        sock.bind(socket.getaddrinfo('0.0.0.0', 80)[0][-1])
+        sock.bind(usocket.getaddrinfo('0.0.0.0', 80)[0][-1])
         sock.listen(2)
         return True
     except Exception as e:
@@ -339,6 +344,9 @@ if config.ENABLE_BACKUP_HTTP_SERVER:
     # try to set up the http server
     if not setup_http_server():
         logger.error("FAILED to setup http server on startup :(")
+    else:
+        poll = uselect.poll()
+        poll.register(sock, uselect.POLLIN)
 else:
     logger.warning("Backup http server disabled!")
 
@@ -349,6 +357,7 @@ setup_websocket_connection()
 logger.info("Starting main loop...")
 
 while True:
+    wdt.feed()
     try:
         # every 15 minutes sync RFID
         if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 900000:
@@ -421,18 +430,16 @@ while True:
 
         if config.ENABLE_BACKUP_HTTP_SERVER:
             # backup http server for manually bumping a door from the local network
-            r, w, err = select((sock,), (), (), 1)
-            if r:
-                for readable in r:
-                    conn, addr = sock.accept()
-                    request = str(conn.recv(2048))
-                    logger.info("got http request!")
-                    logger.info(request)
-                    client_response(conn)
-                    if '/bump?secret=' + config.API_SECRET in request:
-                        logger.info("got authenticated bump request")
-                        swipe_success()
-                        break
+            for event in poll.poll(1):
+                conn, addr = sock.accept()
+                request = str(conn.recv(2048))
+                logger.info("got http request!")
+                logger.info(request)
+                client_response(conn)
+                if '/bump?secret=' + config.API_SECRET in request:
+                    logger.info("got authenticated bump request")
+                    swipe_success()
+                    break
 
         # try to read a card
         card = rfid_reader.read_card()
