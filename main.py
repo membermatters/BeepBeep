@@ -10,6 +10,9 @@ import ubinascii
 import json
 import uwebsockets.client
 import usocket
+from machine import WDT
+wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 2000)
+wdt.feed()
 import uselect
 
 ulogging.basicConfig(level=ulogging.INFO)
@@ -204,6 +207,7 @@ if not wlan.isconnected():
             break
 
         if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
+            wdt.feed()
             led_toggle_last_update = time.ticks_ms()
 
             if led_toggle_last_state:
@@ -353,6 +357,7 @@ setup_websocket_connection()
 logger.info("Starting main loop...")
 
 while True:
+    wdt.feed()
     try:
         # every 15 minutes sync RFID
         if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 900000:
