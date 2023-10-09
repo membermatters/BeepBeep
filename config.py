@@ -2,6 +2,9 @@
 WIEGAND_ENABLED = True
 WIEGAND_ZERO = 27
 WIEGAND_ONE = 26
+TIMER_ID = -1 # timer ID, on ESP32 this could be -1, 0, 1, 2 or 3
+              # for ESP32 use -1 virtual timer (if supported), or 0 for hw timer
+UID_MODE_LEGACY = False
 
 BUZZER_PIN = 16  # IO num, not pin num
 LED_PIN = 14  # IO num, not pin num
