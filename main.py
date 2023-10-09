@@ -10,6 +10,7 @@ import ubinascii
 import json
 import uwebsockets.client
 import usocket
+import uselect
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
@@ -260,7 +261,7 @@ def setup_http_server():
         sock = usocket.socket()
 
         # s.setsockopt(usocket.SOL_SOCKET, usocket.SO_REUSEADDR, 1)
-        sock.bind(socket.getaddrinfo('0.0.0.0', 80)[0][-1])
+        sock.bind(usocket.getaddrinfo('0.0.0.0', 80)[0][-1])
         sock.listen(2)
         return True
     except Exception as e:
@@ -339,6 +340,9 @@ if config.ENABLE_BACKUP_HTTP_SERVER:
     # try to set up the http server
     if not setup_http_server():
         logger.error("FAILED to setup http server on startup :(")
+    else:
+        poll = uselect.poll()
+        poll.register(sock, uselect.POLLIN)
 else:
     logger.warning("Backup http server disabled!")
 
@@ -421,18 +425,16 @@ while True:
 
         if config.ENABLE_BACKUP_HTTP_SERVER:
             # backup http server for manually bumping a door from the local network
-            r, w, err = select((sock,), (), (), 1)
-            if r:
-                for readable in r:
-                    conn, addr = sock.accept()
-                    request = str(conn.recv(2048))
-                    logger.info("got http request!")
-                    logger.info(request)
-                    client_response(conn)
-                    if '/bump?secret=' + config.API_SECRET in request:
-                        logger.info("got authenticated bump request")
-                        swipe_success()
-                        break
+            for event in poll.poll(1):
+                conn, addr = sock.accept()
+                request = str(conn.recv(2048))
+                logger.info("got http request!")
+                logger.info(request)
+                client_response(conn)
+                if '/bump?secret=' + config.API_SECRET in request:
+                    logger.info("got authenticated bump request")
+                    swipe_success()
+                    break
 
         # try to read a card
         card = rfid_reader.read_card()
