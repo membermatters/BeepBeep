@@ -82,19 +82,21 @@ def get_state():
 def neopixel_state(state = None):
     # Update the neopixel colour based on the 
     # state of the platform
+    logger.info(f"Setting LED to {state}")
     if state is not None:
         if state == "Off":
             led[0] = (0,0,0)
-        elif state = "Connected":
+        elif state == "Connected":
             led[0] = (0,0,255)
-        elif state = "Disconnected":
+        elif state == "Disconnected":
             led[0] = (255,0,255)
-        elif state = "Scanned":
+        elif state == "Scanned":
             led[0] = (0,255,255)
-        elif state = "Authorised":
+        elif state == "Authorised":
             led[0] = (0,255,0)
-        elif state = "Denied":
+        elif state == "Denied":
             led[0] = (255,0,0)
+        led.write()
             
 
 def lock_door():
@@ -175,7 +177,8 @@ def led_ok():
 
 
 # setup is starting
-buzz_alert()
+if not config.USE_NEOPIXEL:
+    buzz_alert()
 get_state()  # grab the state from the flash
 
 # setup RFID
