@@ -3,4 +3,4 @@ import config
 import webrepl
 
 if config.ENABLE_WEBREPL:
-    webrepl.start()
+    webrepl.start(password=config.API_SECRET[:9])
