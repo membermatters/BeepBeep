@@ -5,13 +5,14 @@ import config
 import ulogging
 from urdm6300.urdm6300 import Rdm6300
 import time
-from machine import WDT
+from machine import WDT, reset
 import ubinascii
 import json
 import uwebsockets.client
 import uselect
 import hardware
 import httpserver
+import urequests
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
@@ -19,9 +20,10 @@ logger = ulogging.getLogger("main")
 wdt = None
 
 if config.ENABLE_WDT:
+    hardware.buzzer_off()
     logger.warn("Press CTRL+C to stop the WDT starting...")
     time.sleep(3)
-    wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 2000)
+    wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 5000)
 
 
 def feedWDT():
@@ -29,7 +31,6 @@ def feedWDT():
         wdt.feed()
 
 
-CATCH_ALL_EXCEPTIONS = False
 INTERLOCK_SESSION = {
     "session_id": None,  # any value == on, None == off
     "total_kwh": 0,
@@ -239,10 +240,11 @@ def interlock_session_ended():
 
 
 def interlock_power_control(status: bool):
+    tasmota_base_url = f"http://{config.TASMOTA_HOST}/cm?user={config.TASMOTA_USER}&password={config.TASMOTA_PASSWORD}&cmnd=Power%20"
+
     if status:
-        if config.INTERLOCK_REMOTE_IP:
-            # TODO: remote control on
-            logger.warn("Pretending to turn ON interlock!")
+        if config.TASMOTA_HOST:
+            r = urequests.get(tasmota_base_url + "On")
             hardware.rgb_led_set(hardware.RGB_GREEN)
             return True
 
@@ -252,8 +254,8 @@ def interlock_power_control(status: bool):
             return True
 
     else:
-        if config.INTERLOCK_REMOTE_IP:
-            # TODO: remote control off
+        if config.TASMOTA_HOST:
+            r = urequests.get(tasmota_base_url + "Off")
             logger.warn("Pretending to turn OFF interlock!")
             hardware.rgb_led_set(hardware.RGB_BLUE)
             return True
@@ -440,6 +442,11 @@ while True:
                     if data.get("command") == "pong":
                         last_pong = time.ticks_ms()
 
+                    if data.get("command") == "reboot":
+                        logger.warn("Rebooting device!")
+                        hardware.buzz_alert()
+                        reset()
+
                     if data.get("command") == "bump" and config.DEVICE_TYPE == "door":
                         logger.info("Bumping Door!")
                         door_swipe_success()
@@ -551,8 +558,10 @@ while True:
         hardware.led_off()
         hardware.buzzer_off()
 
-        if CATCH_ALL_EXCEPTIONS:
-            print("excepted, but CATCH_ALL_EXCEPTIONS is enabled so ignoring :( ")
+        if config.CATCH_ALL_EXCEPTIONS:
+            print(
+                "excepted, but config.CATCH_ALL_EXCEPTIONS is enabled so ignoring :( "
+            )
             print(e)
             continue
         else:

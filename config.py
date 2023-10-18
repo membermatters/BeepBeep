@@ -1,6 +1,8 @@
 # General Device Config
 DEVICE_TYPE = "interlock"  # "door", "interlock" or "memberbucks"
-INTERLOCK_REMOTE_IP = "192.168.1.61"  # set to the IP of the TASMOTA switching device if remote control is enabled
+TASMOTA_HOST = "192.168.2.61"  # set to the IP of the TASMOTA switching device if remote control is enabled
+TASMOTA_USER = "admin"
+TASMOTA_PASSWORD = "admin"
 LOCK_REVERSED = False
 LED_REVERSED = True
 BUZZER_ENABLED = True
@@ -38,7 +40,10 @@ ENABLE_BACKUP_HTTP_SERVER = False
 ENABLE_WEBREPL = False
 
 # Enables the hardware watchdog timer.
-ENABLE_WDT = False
+ENABLE_WDT = True
+
+# Ignore exceptions and continue the event loop
+CATCH_ALL_EXCEPTIONS = True
 
 # WiFi Tx Power
 TX_POWER = 8.5
