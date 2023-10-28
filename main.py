@@ -1,4 +1,3 @@
-import os
 import uwiegand
 import network
 import config
@@ -12,18 +11,25 @@ import uwebsockets.client
 import uselect
 import hardware
 import httpserver
-import urequests
+import utils
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
 
+hardware.buzzer_off()
+hardware.rgb_led_set(hardware.RGB_OFF)
+hardware.led_off()
+
 wdt = None
 
 if config.ENABLE_WDT:
-    hardware.buzzer_off()
     logger.warn("Press CTRL+C to stop the WDT starting...")
     time.sleep(3)
     wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 5000)
+
+# setup is starting
+hardware.rgb_led_set(hardware.RGB_PURPLE)
+hardware.alert(rgb_return_colour=hardware.RGB_PURPLE)
 
 
 def feedWDT():
@@ -36,14 +42,6 @@ INTERLOCK_SESSION = {
     "total_kwh": 0,
 }
 STATE = {"locked_out": False, "tag_hash": ""}
-
-
-def file_or_dir_exists(filename):
-    try:
-        os.stat(filename)
-        return True
-    except OSError:
-        return False
 
 
 def save_state(state):
@@ -69,7 +67,7 @@ def get_state():
     global STATE
     try:
         # create it if it doesn't exist
-        if not file_or_dir_exists("state.json"):
+        if not utils.file_or_dir_exists("state.json"):
             with open("state.json", "w") as state_file:
                 json.dump(STATE, state_file)
 
@@ -85,10 +83,6 @@ def get_state():
         return False
 
 
-# setup is starting
-hardware.buzz_alert()
-get_state()  # grab the state from the flash
-
 # setup RFID
 if config.WIEGAND_ENABLED:
     # setup wiegand reader
@@ -101,7 +95,7 @@ else:
 
 try:
     # create it if it doesn't exist
-    if not file_or_dir_exists("tags.json"):
+    if not utils.file_or_dir_exists("tags.json"):
         with open("tags.json", "w") as new_tags:
             json.dump([], new_tags)
 
@@ -114,6 +108,7 @@ try:
 except:
     logger.error("Could not load saved tags (unhandled error)")
 
+get_state()  # grab the state from the flash
 
 # setup wifi
 wlan = network.WLAN(network.STA_IF)
@@ -128,30 +123,35 @@ led_toggle_last_update = time.ticks_ms()
 led_toggle_last_state = False
 
 if not wlan.isconnected():
-    logger.info("connecting to network...")
+    logger.info("Connecting to network...")
     wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
     while not wlan.isconnected():
-        if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 30000:
+        feedWDT()
+
+        if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 20000:
             logger.warn("Took too long to wait for WiFi!")
             logger.warn(
                 "The ESP32 should continue trying to connect in the background."
             )
             hardware.led_off()
+            hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
             break
 
         if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
-            feedWDT()
             led_toggle_last_update = time.ticks_ms()
 
             if led_toggle_last_state:
                 hardware.led_off()
+                hardware.rgb_led_set(hardware.RGB_OFF)
                 led_toggle_last_state = False
 
             else:
                 hardware.led_on()
+                hardware.rgb_led_set(hardware.RGB_PURPLE)
                 led_toggle_last_state = True
 
     hardware.led_off()
+    hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
 
     local_ip = wlan.ifconfig()[0]
     logger.info("Local IP: " + local_ip)
@@ -162,15 +162,16 @@ websocket = None
 led_update = time.ticks_ms()
 ten_second_cron_update = time.ticks_ms()
 last_pong = None
-
-DEVICE_SERIAL = local_mac
-WS_URL = f"{config.PORTAL_WS_URL}/{config.DEVICE_TYPE}/{DEVICE_SERIAL}"
+last_rfid_sync = time.ticks_ms()
 
 
 def setup_websocket_connection():
     global websocket, led_ring, last_pong
+
+    WS_URL = f"{config.PORTAL_WS_URL}/{config.DEVICE_TYPE}/{local_mac}"
+
     try:
-        logger.info("setting up websocket")
+        logger.info("connecting to websocket...")
         logger.info("WS_URL: " + WS_URL)
         websocket = uwebsockets.client.connect(WS_URL)
         last_pong = time.ticks_ms()
@@ -181,13 +182,9 @@ def setup_websocket_connection():
         ip_packet = {"command": "ip_address", "ip_address": local_ip}
         websocket.send(json.dumps(ip_packet))
 
-        hardware.led_ok()
-
     except Exception as e:
         logger.error("Couldn't connect to websocket!")
         logger.error(str(e))
-
-        hardware.led_off()
 
 
 def save_tags(new_tags):
@@ -200,7 +197,7 @@ def save_tags(new_tags):
         # save the tags to flash
         with open("tags.json", "w") as new_tags:
             json.dump(authorised_rfid_tags, new_tags)
-            logger.debug("saved tags to flash")
+            logger.debug("Saved tags to flash")
 
         logger.debug("Syncing tags done!")
 
@@ -229,57 +226,27 @@ def log_door_swipe(card_id, rejected=False, locked_out=False):
         pass
 
 
-def interlock_session_started():
-    hardware.rgb_led_set(hardware.RGB_GREEN)
-    hardware.buzz_ok()
+def interlock_end_session():
+    if (
+        INTERLOCK_SESSION.get("session_id")
+        and INTERLOCK_SESSION.get("session_id") != "system"
+    ):
+        print(INTERLOCK_SESSION.get("session_id"))
+        try:
+            interlock_packet = {
+                "command": "interlock_session_end",
+                "session_id": INTERLOCK_SESSION.get("session_id"),
+                "session_kwh": INTERLOCK_SESSION.get("session_kwh"),
+                "card_id": card,
+            }
+            websocket.send(json.dumps(interlock_packet))
+        except:
+            hardware.alert()
 
-
-def interlock_session_ended():
-    hardware.rgb_led_set(hardware.RGB_BLUE)
-    hardware.buzz_ok()
-
-
-def interlock_power_control(status: bool):
-    tasmota_base_url = f"http://{config.TASMOTA_HOST}/cm?user={config.TASMOTA_USER}&password={config.TASMOTA_PASSWORD}&cmnd=Power%20"
-
-    if status:
-        if config.TASMOTA_HOST:
-            r = urequests.get(tasmota_base_url + "On")
-            hardware.rgb_led_set(hardware.RGB_GREEN)
-            return True
-
-        else:
-            hardware.unlock()
-            hardware.rgb_led_set(hardware.RGB_GREEN)
-            return True
-
-    else:
-        if config.TASMOTA_HOST:
-            r = urequests.get(tasmota_base_url + "Off")
-            logger.warn("Pretending to turn OFF interlock!")
-            hardware.rgb_led_set(hardware.RGB_BLUE)
-            return True
-
-        else:
-            hardware.lock()
-            hardware.rgb_led_set(hardware.RGB_BLUE)
-            return True
-
-
-def door_swipe_success():
-    # TODO: add support for a contact sensor to make locking logic more robust
-    logger.warn("Unlocking!")
-    hardware.unlock()
-    hardware.rgb_led_set(hardware.RGB_GREEN)
-    hardware.buzz_ok()
-    time.sleep(config.UNLOCK_DELAY)
-    hardware.lock()
-    hardware.rgb_led_set(hardware.RGB_BLUE)
-    logger.warn("Locking!")
-
-
-def door_swipe_denied():
-    hardware.buzz_alert()
+    INTERLOCK_SESSION["session_id"] = None
+    INTERLOCK_SESSION["total_kwh"] = 0
+    hardware.interlock_power_control(False)
+    hardware.interlock_session_ended()
 
 
 def handle_swipe_door(card: str):
@@ -291,7 +258,7 @@ def handle_swipe_door(card: str):
                 log_door_swipe(card, locked_out=True)
             except:
                 pass
-            door_swipe_denied()
+            hardware.door_swipe_denied()
 
         else:
             # if there's an issue logging the swipe, open the door anyway
@@ -299,22 +266,20 @@ def handle_swipe_door(card: str):
                 log_door_swipe(card)
             except:
                 pass
-            door_swipe_success()
+            # TODO: check if door was manually unlocked and only unlock on a double swipe
+            hardware.door_swipe_success()
 
     else:
         try:
             log_door_swipe(card, rejected=True)
         except:
             pass
-        door_swipe_denied()
+        hardware.door_swipe_denied()
 
 
 def handle_swipe_interlock(card: str):
-    current_session_id = INTERLOCK_SESSION.get("session_id")
-    current_session_kwh = INTERLOCK_SESSION.get("total_kwh")
-
     # request a new interlock session
-    if current_session_id is None:
+    if INTERLOCK_SESSION.get("session_id") is None:
         interlock_packet = {
             "command": "interlock_session_start",
             "card_id": card,
@@ -322,38 +287,21 @@ def handle_swipe_interlock(card: str):
         try:
             websocket.send(json.dumps(interlock_packet))
         except:
-            hardware.buzz_alert()
-        hardware.buzz_card_read()
+            hardware.alert()
 
     # turn off the interlock if it was manually turned on by the system
-    elif current_session_id == "system":
+    elif INTERLOCK_SESSION.get("session_id") == "system":
         interlock_packet = {"command": "interlock_off"}
 
         try:
             websocket.send(json.dumps(interlock_packet))
+            interlock_end_session()
         except:
-            hardware.buzz_alert()
-
-        hardware.buzz_card_read()
-        interlock_power_control(False)
+            hardware.alert()
 
     # end the current interlock session
     else:
-        interlock_packet = {
-            "command": "interlock_session_end",
-            "session_id": current_session_id,
-            "session_kwh": current_session_kwh,
-            "card_id": card,
-        }
-        try:
-            INTERLOCK_SESSION["session_id"] = None
-            INTERLOCK_SESSION["total_kwh"] = 0
-            websocket.send(json.dumps(interlock_packet))
-        except:
-            hardware.buzz_alert()
-
-        hardware.buzz_card_read()
-        interlock_power_control(False)
+        interlock_end_session()
 
 
 def handle_swipe_memberbucks(card: str):
@@ -370,20 +318,19 @@ if config.ENABLE_BACKUP_HTTP_SERVER:
 else:
     logger.warning("Backup http server disabled!")
 
-last_rfid_sync = time.ticks_ms()
-
 setup_websocket_connection()
 
 logger.info("Starting main loop...")
+hardware.led_on()
+time.sleep(0.5)
+hardware.led_off()
+hardware.rgb_led_set(hardware.RGB_BLUE)
+
+last_card_id = None
 
 while True:
     feedWDT()
     try:
-        # every 15 minutes sync RFID
-        if time.ticks_diff(time.ticks_ms(), last_rfid_sync) >= 15 * 60 * 1000:
-            last_rfid_sync = time.ticks_ms()
-            websocket.send(json.dumps({"command": "sync"}))
-
         # every 10 seconds run cron tasks
         cron_period = 10 * 1000
 
@@ -411,7 +358,10 @@ while True:
                     # skip the rest of this event loop
                     continue
 
-                if INTERLOCK_SESSION.get("session_id") is not None:
+                if (
+                    INTERLOCK_SESSION.get("session_id") is not None
+                    and INTERLOCK_SESSION.get("session_id") != "system"
+                ):
                     logger.debug("Sending interlock session update")
                     interlock_packet = {
                         "command": "interlock_session_update",
@@ -430,28 +380,37 @@ while True:
         if websocket and websocket.open:
             data = websocket.recv()
             if data:
-                logger.info("Got websocket packet:")
-                logger.info(data)
+                logger.debug("Got websocket packet:")
+                logger.debug(data)
 
                 try:
                     data = json.loads(data)
 
                     if data.get("authorised") is not None:
-                        logger.info(str(data))
+                        logger.info("Got authorisation packet.")
 
-                    if data.get("command") == "pong":
+                    elif data.get("command") == "pong":
                         last_pong = time.ticks_ms()
 
-                    if data.get("command") == "reboot":
+                    elif data.get("command") == "ping":
+                        websocket.send(json.dumps({"command": "pong"}))
+
+                    elif data.get("command") == "reboot":
                         logger.warn("Rebooting device!")
-                        hardware.buzz_alert()
+                        if config.DEVICE_TYPE == "interlock":
+                            interlock_end_session()
+                        else:
+                            hardware.lock()
+                            hardware.buzz_action()
+                        hardware.rgb_led_set(hardware.RGB_OFF)
                         reset()
 
-                    if data.get("command") == "bump" and config.DEVICE_TYPE == "door":
-                        logger.info("Bumping Door!")
-                        door_swipe_success()
+                    elif data.get("command") == "bump" and config.DEVICE_TYPE == "door":
+                        if config.DEVICE_TYPE == "door":
+                            logger.info("Bumping Door!")
+                            hardware.door_swipe_success()
 
-                    if data.get("command") == "sync":
+                    elif data.get("command") == "sync":
                         tags_hash_new = data.get("hash")
                         tags_hash_current = STATE.get("tag_hash")
 
@@ -463,49 +422,55 @@ while True:
                         else:
                             logger.info("Tags hash unchanged, skipping save.")
 
-                    if data.get("command") == "interlock_on":
-                        if interlock_power_control(True):
-                            INTERLOCK_SESSION[
-                                "session_id"
-                            ] = "system"  # special state - manually turned on by the system
-                            interlock_session_started()
-                            hardware.rgb_led_set(hardware.RGB_GREEN)
+                    elif data.get("command") == "unlock":
+                        if config.DEVICE_TYPE == "interlock":
+                            logger.info("Turning on interlock from manual request!")
+                            if hardware.interlock_power_control(True):
+                                INTERLOCK_SESSION[
+                                    "session_id"
+                                ] = "system"  # special state - manually turned on by the system
+                                hardware.interlock_session_started()
 
+                            elif config.DEVICE_TYPE == "door":
+                                logger.warn("Interlock power control failed!")
+                                hardware.alert()
                         else:
-                            logger.warn("Interlock power control failed!")
-                            hardware.buzz_alert()
+                            logger.info("Unlocking device from manual request!")
+                            hardware.unlock()
 
-                    if data.get("command") == "interlock_off":
-                        logger.info("Turning off interlock and ending session!")
+                    elif data.get("command") == "lock":
+                        if config.DEVICE_TYPE == "interlock":
+                            logger.info("Turning off interlock from manual request!")
+                            interlock_end_session()
+                        elif config.DEVICE_TYPE == "door":
+                            logger.info("Locking device from manual request!")
+                            hardware.lock()
 
-                        INTERLOCK_SESSION["session_id"] = None
-                        INTERLOCK_SESSION["total_kwh"] = 0
+                    elif data.get("command") == "interlock_session_start":
+                        if config.DEVICE_TYPE == "interlock":
+                            logger.info("Turning on interlock from new session!")
 
-                        if interlock_power_control(False):
-                            interlock_session_ended()
-                            hardware.rgb_led_set(hardware.RGB_BLUE)
+                            INTERLOCK_SESSION["session_id"] = data.get("session_id")
+                            INTERLOCK_SESSION["total_kwh"] = 0
 
-                        else:
-                            logger.warn("Interlock power control failed!")
-                            hardware.buzz_alert()
+                            if hardware.interlock_power_control(True):
+                                hardware.interlock_session_started()
 
-                    if data.get("command") == "interlock_session_start":
-                        logger.info("Turning on interlock from new session!")
+                            else:
+                                logger.warn("Interlock power control failed!")
+                                hardware.alert()
 
-                        INTERLOCK_SESSION["session_id"] = data.get("session_id")
-                        INTERLOCK_SESSION["total_kwh"] = 0
+                    elif data.get("command") == "interlock_session_rejected":
+                        if config.DEVICE_TYPE == "interlock":
+                            logger.info("Interlock session request failed!")
+                            hardware.alert()
 
-                        if interlock_power_control(True):
-                            interlock_session_started()
-                            hardware.rgb_led_set(hardware.RGB_GREEN)
+                    elif data.get("command") == "interlock_session_update":
+                        pass
 
-                        else:
-                            logger.warn("Interlock power control failed!")
-                            hardware.buzz_alert()
-
-                    if data.get("command") == "interlock_session_rejected":
-                        logger.info("Interlock session request failed!")
-                        hardware.buzz_alert()
+                    else:
+                        logger.warn("Unknown websocket packet!")
+                        logger.warn(json.dumps(data))
 
                 except Exception as e:
                     logger.error("Error parsing JSON websocket packet!")
@@ -516,12 +481,15 @@ while True:
             for event in poll.poll(1):
                 conn, addr = httpserver.sock.accept()
                 request = str(conn.recv(2048))
+                hardware.rgb_led_set(hardware.RGB_PURPLE)
                 logger.info("got http request!")
                 logger.info(request)
+                time.sleep(0.1)
+                hardware.rgb_led_set(hardware.RGB_BLUE)
                 httpserver.client_response(conn)
                 if "/bump?secret=" + config.API_SECRET in request:
                     logger.info("got authenticated bump request")
-                    door_swipe_success()
+                    hardware.door_swipe_success()
                     break
 
         # try to read a card
@@ -530,6 +498,9 @@ while True:
         if card:
             card = str(card)
             logger.info("got a card: " + card)
+
+            if config.BUZZ_ON_SWIPE:
+                hardware.buzz_card_read()
 
             if config.DEVICE_TYPE == "door":
                 handle_swipe_door(card)
@@ -544,11 +515,13 @@ while True:
             while True:
                 if not rfid_reader.read_card():
                     break
+            last_card_id = card
             card = None
 
     except KeyboardInterrupt as e:
         # turn off the LED and buzzer in case they were left on
         hardware.led_off()
+        hardware.rgb_led_set(hardware.RGB_WHITE)
         hardware.buzzer_off()
 
         raise e
@@ -556,6 +529,7 @@ while True:
     except Exception as e:
         # turn off the LED and buzzer in case they were left on
         hardware.led_off()
+        hardware.rgb_led_set(hardware.RGB_WHITE)
         hardware.buzzer_off()
 
         if config.CATCH_ALL_EXCEPTIONS:
