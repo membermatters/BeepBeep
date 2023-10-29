@@ -1,3 +1,6 @@
 [submodule "urdm6300"]
 	path = urdm6300
 	url = https://github.com/membermatters/urdm6300.git
+[submodule "micropython-i2c-lcd"]
+	path = micropython-i2c-lcd
+	url = https://github.com/brainelectronics/micropython-i2c-lcd.git

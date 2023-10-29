@@ -30,6 +30,8 @@ if config.ENABLE_WDT:
 # setup is starting
 hardware.rgb_led_set(hardware.RGB_PURPLE)
 hardware.alert(rgb_return_colour=hardware.RGB_PURPLE)
+hardware.lcd.begin()
+hardware.lcd.print("Initialising...")
 
 
 def feedWDT():
@@ -111,6 +113,8 @@ except:
 get_state()  # grab the state from the flash
 
 # setup wifi
+hardware.lcd.clear()
+hardware.lcd.print("Connecting WiFi")
 wlan = network.WLAN(network.STA_IF)
 local_ip = None  # store our local IP address
 local_mac = ubinascii.hexlify(wlan.config("mac")).decode()  # store our mac address
@@ -123,7 +127,7 @@ led_toggle_last_update = time.ticks_ms()
 led_toggle_last_state = False
 
 if not wlan.isconnected():
-    logger.info("Connecting to network...")
+    logger.info("Connecting To WiFi...")
     wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
     while not wlan.isconnected():
         feedWDT()
@@ -173,6 +177,8 @@ def setup_websocket_connection():
     try:
         logger.info("connecting to websocket...")
         logger.info("WS_URL: " + WS_URL)
+        hardware.lcd.clear()
+        hardware.lcd.print("Connecting WS")
         websocket = uwebsockets.client.connect(WS_URL)
         last_pong = time.ticks_ms()
 
@@ -325,6 +331,16 @@ hardware.led_on()
 time.sleep(0.5)
 hardware.led_off()
 hardware.rgb_led_set(hardware.RGB_BLUE)
+
+if config.DEVICE_TYPE == "interlock":
+    hardware.lcd.clear()
+    hardware.lcd.print("Swipe Card To   Unlock Interlock")
+elif config.DEVICE_TYPE == "door":
+    hardware.lcd.clear()
+    hardware.lcd.print("Swipe Card To   Unlock Door")
+elif config.DEVICE_TYPE == "memberbucks":
+    hardware.lcd.clear()
+    hardware.lcd.print("Swipe Card To   Pay")
 
 last_card_id = None
 

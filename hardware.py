@@ -2,15 +2,32 @@ import config
 import time
 import ulogging
 import urequests
-from machine import Pin, PWM
+from machine import Pin, I2C
 from neopixel import NeoPixel
+
+lcd_i2c = __import__("micropython-i2c-lcd.lcd_i2c")
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
 
 DEVICE_TYPE = config.DEVICE_TYPE
 
-# setup pins
+# setup i2c and lcd
+i2c = I2C(0, scl=Pin(config.SCL_PIN), sda=Pin(config.SDA_PIN), freq=400000)
+for device in i2c.scan():
+    logger.debug("Found the following i2c devices: ")
+    logger.debug(f"Decimal address: {device} | Hexa address: {hex(device)}")
+
+lcd = None
+if config.LCD_ADDR:
+    lcd = lcd_i2c.lcd_i2c.LCD(
+        addr=config.LCD_ADDR, cols=config.LCD_COLS, rows=config.LCD_ROWS, i2c=i2c
+    )
+    lcd.begin()
+    lcd.autoscroll()
+    lcd.blink_on()
+
+# setup other pins
 buzzer = Pin(config.BUZZER_PIN, Pin.OUT)
 lock_pin = Pin(config.LOCK_PIN, Pin.OUT, value=config.LOCK_REVERSED)
 led = None
@@ -89,16 +106,24 @@ def led_on():
     if config.LED_PIN:
         if config.LED_REVERSED:
             led.off()
+            if lcd:
+                lcd.no_backlight()
         else:
             led.on()
+            if lcd:
+                lcd.backlight()
 
 
 def led_off():
     if config.LED_PIN:
         if config.LED_REVERSED:
             led.on()
+            if lcd:
+                lcd.backlight()
         else:
             led.off()
+            if lcd:
+                lcd.no_backlight()
 
 
 def buzzer_on():

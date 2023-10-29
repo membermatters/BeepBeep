@@ -131,9 +131,7 @@ dmypy.json
 .pyre/
 
 .DS_Store
-
 state.json
-
 tags.json
-
 urdm6300
+config.py
