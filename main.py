@@ -118,9 +118,11 @@ hardware.lcd.print("Connecting WiFi")
 wlan = network.WLAN(network.STA_IF)
 local_ip = None  # store our local IP address
 local_mac = ubinascii.hexlify(wlan.config("mac")).decode()  # store our mac address
+hostname = "MM_Controller_" + local_mac
+network.hostname(hostname)
 
 wlan.active(True)
-wlan.config(dhcp_hostname="MM_Controller_" + local_mac, txpower=config.TX_POWER)
+wlan.config(txpower=config.TX_POWER or 0)
 
 wlan_connecting_start = time.ticks_ms()
 led_toggle_last_update = time.ticks_ms()

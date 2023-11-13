@@ -35,18 +35,15 @@ WIEGAND_ONE = 14
 UID_32BIT_MODE = True
 
 # Which portal instance to connect to
-PORTAL_WS_URL = "ws://192.168.1.174:8080/api/ws/access"
+# PORTAL_WS_URL = "ws://192.168.1.174:8080/api/ws/access"
 # PORTAL_WS_URL = "ws://10.0.0.130:8080/api/ws/access"
-# PORTAL_WS_URL = "wss://portal.brisbanemaker.space/ws/access"
+PORTAL_WS_URL = "wss://portal.brisbanemaker.space/ws/access"
 
 # WiFi and Access Control Device API key from portal
-API_SECRET = "7ioWPv23.fZRez6dtkclffdMD3mIjUMndN0Wr6zbA"  # dev
-# API_SECRET = "DQWvSFI8.oKg3sJbbz3TchNB1CdCcwPp3yrLWg5JS" # prd
-WIFI_SSID = "bmsiot"
-WIFI_PASS = "444422224444"
-
-# WIFI_SSID = "crab labs"
-# WIFI_PASS = "crustaceansarekool"
+# API_SECRET = "7ioWPv23.fZRez6dtkclffdMD3mIjUMndN0Wr6zbA"  # dev
+API_SECRET = "secure_api_secret"  # prd
+WIFI_SSID = "cool_name"
+WIFI_PASS = "secure_password"
 
 # You probably shouldn't mess with these!
 
@@ -63,8 +60,8 @@ ENABLE_WDT = False
 # Ignore exceptions and continue the event loop
 CATCH_ALL_EXCEPTIONS = True
 
-# WiFi Tx Power
-TX_POWER = 8.5
+# WiFi Tx Power - set to None for max power
+TX_POWER = None
 
 # ESP timer ID. For ESP32 use -1 virtual timer (if supported), or 0 for hw timer
 TIMER_ID = -1
