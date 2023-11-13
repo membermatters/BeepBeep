@@ -4,8 +4,7 @@ import ulogging
 import urequests
 from machine import Pin, I2C
 from neopixel import NeoPixel
-
-lcd_i2c = __import__("micropython-i2c-lcd.lcd_i2c")
+from ulcdscreen import LcdScreen
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
@@ -14,18 +13,24 @@ DEVICE_TYPE = config.DEVICE_TYPE
 
 # setup i2c and lcd
 i2c = I2C(0, scl=Pin(config.SCL_PIN), sda=Pin(config.SDA_PIN), freq=400000)
-for device in i2c.scan():
-    logger.debug("Found the following i2c devices: ")
-    logger.debug(f"Decimal address: {device} | Hexa address: {hex(device)}")
-
+i2c_devices = []
 lcd = None
-if config.LCD_ADDR:
-    lcd = lcd_i2c.lcd_i2c.LCD(
-        addr=config.LCD_ADDR, cols=config.LCD_COLS, rows=config.LCD_ROWS, i2c=i2c
+
+for device in i2c.scan():
+    i2c_devices.append(device)
+    logger.debug(
+        f"Found i2c device. Decimal address: {device} | Hexa address: {hex(device)}"
     )
-    lcd.begin()
-    lcd.autoscroll()
-    lcd.blink_on()
+
+if config.LCD_ADDR in i2c_devices:
+    lcd = LcdScreen(
+        i2c, i2c_address=config.LCD_ADDR, columns=config.LCD_COLS, rows=config.LCD_ROWS
+    )
+
+else:
+    # initialise without i2c address, and it will silently skip all writes to the i2c bus
+    logger.error("LCD not found on i2c bus but it's configured!")
+    lcd = LcdScreen(i2c, i2c_address=None)
 
 # setup other pins
 buzzer = Pin(config.BUZZER_PIN, Pin.OUT)
