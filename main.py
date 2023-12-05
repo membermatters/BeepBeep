@@ -1,17 +1,17 @@
-import uwiegand
 import network
 import config
 import ulogging
-from urdm6300.urdm6300 import Rdm6300
 import time
 from machine import WDT, reset
 import ubinascii
 import json
 import uwebsockets.client
-import uselect
 import hardware
-import httpserver
 import utils
+import gc
+
+if config.ENABLE_BACKUP_HTTP_SERVER:
+    import httpserver
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
@@ -20,23 +20,10 @@ hardware.buzzer_off()
 hardware.rgb_led_set(hardware.RGB_OFF)
 hardware.led_off()
 
-wdt = None
-
-if config.ENABLE_WDT:
-    logger.warn("Press CTRL+C to stop the WDT starting...")
-    time.sleep(3)
-    wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 5000)
-
 # setup is starting
 hardware.rgb_led_set(hardware.RGB_PURPLE)
 hardware.alert(rgb_return_colour=hardware.RGB_PURPLE)
-hardware.lcd.begin()
 hardware.lcd.print("Initialising...")
-
-
-def feedWDT():
-    if config.ENABLE_WDT and wdt:
-        wdt.feed()
 
 
 INTERLOCK_SESSION = {
@@ -88,10 +75,14 @@ def get_state():
 # setup RFID
 if config.WIEGAND_ENABLED:
     # setup wiegand reader
+    import uwiegand
+
     rfid_reader = uwiegand.Wiegand(
         config.WIEGAND_ZERO, config.WIEGAND_ONE, uid_32bit_mode=config.UID_32BIT_MODE
     )
 else:
+    from urdm6300.urdm6300 import Rdm6300
+
     rfid_reader = Rdm6300()
 
 
@@ -115,25 +106,26 @@ get_state()  # grab the state from the flash
 # setup wifi
 hardware.lcd.clear()
 hardware.lcd.print("Connecting WiFi")
-wlan = network.WLAN(network.STA_IF)
-local_ip = None  # store our local IP address
-local_mac = ubinascii.hexlify(wlan.config("mac")).decode()  # store our mac address
-hostname = "MM_Controller_" + local_mac
-network.hostname(hostname)
 
-wlan.active(True)
-wlan.config(txpower=config.TX_POWER or 0)
+sta_if = network.WLAN(network.STA_IF)
+local_ip = None  # store our local IP address
+local_mac = ubinascii.hexlify(sta_if.config("mac")).decode()  # store our mac address
+
+hostname = "MM_Controller_" + local_mac
+# network.hostname(hostname)
 
 wlan_connecting_start = time.ticks_ms()
 led_toggle_last_update = time.ticks_ms()
 led_toggle_last_state = False
 
-if not wlan.isconnected():
+if not sta_if.isconnected():
     logger.info("Connecting To WiFi...")
-    wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
-    while not wlan.isconnected():
-        feedWDT()
+    sta_if.active(True)
+    if config.TX_POWER:
+        sta_if.config(txpower=config.TX_POWER)
+    sta_if.connect(config.WIFI_SSID, config.WIFI_PASS)
 
+    while not sta_if.isconnected():
         if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 20000:
             logger.warn("Took too long to wait for WiFi!")
             logger.warn(
@@ -145,6 +137,7 @@ if not wlan.isconnected():
 
         if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
             led_toggle_last_update = time.ticks_ms()
+            hardware.feedWDT()
 
             if led_toggle_last_state:
                 hardware.led_off()
@@ -159,7 +152,7 @@ if not wlan.isconnected():
     hardware.led_off()
     hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
 
-    local_ip = wlan.ifconfig()[0]
+    local_ip = sta_if.ifconfig()[0]
     logger.info("Local IP: " + local_ip)
     logger.info("Local MAC: " + local_mac)
 
@@ -173,6 +166,9 @@ last_rfid_sync = time.ticks_ms()
 
 def setup_websocket_connection():
     global websocket, led_ring, last_pong
+
+    if not sta_if.isconnected():
+        logger.warn("WiFi not connected...")
 
     WS_URL = f"{config.PORTAL_WS_URL}/{config.DEVICE_TYPE}/{local_mac}"
 
@@ -313,10 +309,20 @@ def handle_swipe_interlock(card: str):
 
 
 def handle_swipe_memberbucks(card: str):
-    pass
+    # attempt to debit the card
+    debit_packet = {"command": "debit", "card_id": card, "amount": config.VEND_PRICE}
+    try:
+        websocket.send(json.dumps(debit_packet))
+        hardware.lcd.clear()
+        hardware.lcd.print("Please Wait... ")
+        hardware.lcd.blink()
+    except:
+        hardware.alert()
 
 
 if config.ENABLE_BACKUP_HTTP_SERVER:
+    import uselect
+
     # try to set up the http server
     if not httpserver.setup_http_server():
         logger.error("FAILED to setup http server on startup :(")
@@ -334,26 +340,31 @@ time.sleep(0.5)
 hardware.led_off()
 hardware.rgb_led_set(hardware.RGB_BLUE)
 
-if config.DEVICE_TYPE == "interlock":
-    hardware.lcd.clear()
-    hardware.lcd.print("Swipe Card To   Unlock Interlock")
-elif config.DEVICE_TYPE == "door":
-    hardware.lcd.clear()
-    hardware.lcd.print("Swipe Card To   Unlock Door")
-elif config.DEVICE_TYPE == "memberbucks":
-    hardware.lcd.clear()
-    hardware.lcd.print("Swipe Card To   Pay")
+
+def print_device_standby_message():
+    if config.DEVICE_TYPE == "interlock":
+        hardware.lcd.clear()
+        hardware.lcd.print("Swipe To Unlock")
+    elif config.DEVICE_TYPE == "door":
+        hardware.lcd.clear()
+        hardware.lcd.print("Swipe To Unlock")
+    elif config.DEVICE_TYPE == "memberbucks":
+        hardware.lcd.clear()
+        hardware.lcd.print("Swipe To Pay")
+
 
 last_card_id = None
+print_device_standby_message()
 
 while True:
-    feedWDT()
+    hardware.feedWDT()
     try:
         # every 10 seconds run cron tasks
         cron_period = 10 * 1000
 
         if time.ticks_diff(time.ticks_ms(), ten_second_cron_update) > cron_period:
             ten_second_cron_update = time.ticks_ms()
+            gc.collect()
 
             if websocket and websocket.open:
                 logger.debug("sending ping")
@@ -365,6 +376,7 @@ while True:
                         "Websocket not open (pong timeout), trying to reconnect."
                     )
                     setup_websocket_connection()
+                    print_device_standby_message()
                     # skip the rest of this event loop
                     continue
 
@@ -422,6 +434,12 @@ while True:
                             hardware.buzz_action()
                         hardware.rgb_led_set(hardware.RGB_OFF)
                         reset()
+
+                    elif data.get("command") == "update_device_locked_out":
+                        locked_out = data.get("locked_out")
+                        logger.info(f"Updating device locked out {locked_out}!")
+                        STATE["locked_out"] = locked_out
+                        save_state(STATE)
 
                     elif data.get("command") == "bump" and config.DEVICE_TYPE == "door":
                         if config.DEVICE_TYPE == "door":
@@ -486,6 +504,44 @@ while True:
                     elif data.get("command") == "interlock_session_update":
                         pass
 
+                    elif data.get("command") == "debit":
+                        hardware.lcd.reset_screen()
+                        print(data)
+                        success = data.get("success")
+                        balance = data.get("balance")
+
+                        if balance:
+                            balance = "$" + str(round(float(balance) / 100, 2))
+                        else:
+                            balance = "Unknown"
+
+                        if success:
+                            logger.info("Debit successful!")
+                            hardware.lcd.clear()
+                            hardware.lcd.print("Vend Success! ")
+                            hardware.lcd.print_rocket()
+                            hardware.lcd.print(f" Balance: {balance})")
+                            hardware.buzz_action()
+                            hardware.vend_product()
+                            time.sleep(5)
+                            print_device_standby_message()
+                        else:
+                            logger.info("Debit failed!")
+                            hardware.lcd.clear()
+                            hardware.lcd.print(f"Vend Declined :(Balance: {balance}")
+                            hardware.lcd.no_backlight()
+                            hardware.rgb_led_set(hardware.RGB_RED)
+                            time.sleep(0.25)
+                            hardware.lcd.backlight()
+                            time.sleep(0.25)
+                            hardware.lcd.no_backlight()
+                            time.sleep(0.25)
+                            hardware.lcd.backlight()
+                            hardware.feedWDT()
+                            time.sleep(5)
+                            hardware.rgb_led_set(hardware.RGB_BLUE)
+                            print_device_standby_message()
+
                     else:
                         logger.warn("Unknown websocket packet!")
                         logger.warn(json.dumps(data))
@@ -541,15 +597,12 @@ while True:
         hardware.led_off()
         hardware.rgb_led_set(hardware.RGB_WHITE)
         hardware.buzzer_off()
+        hardware.lcd.clear()
+        hardware.lcd.print("KeybInt Stopped.")
 
         raise e
 
     except Exception as e:
-        # turn off the LED and buzzer in case they were left on
-        hardware.led_off()
-        hardware.rgb_led_set(hardware.RGB_WHITE)
-        hardware.buzzer_off()
-
         if config.CATCH_ALL_EXCEPTIONS:
             print(
                 "excepted, but config.CATCH_ALL_EXCEPTIONS is enabled so ignoring :( "
@@ -557,4 +610,10 @@ while True:
             print(e)
             continue
         else:
+            hardware.lcd.clear()
+            hardware.lcd.print("Error Stopped.")
+            # turn off the LED and buzzer in case they were left on
+            hardware.led_off()
+            hardware.rgb_led_set(hardware.RGB_WHITE)
+            hardware.buzzer_off()
             raise e

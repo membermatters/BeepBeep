@@ -12,12 +12,22 @@ TASMOTA_HOST = None  # "192.168.2.61"  # set to the IP of the TASMOTA switching 
 TASMOTA_USER = "admin"
 TASMOTA_PASSWORD = "admin"
 
+# Vending Config
+VEND_PRICE = 250  # price in cents to debit an account
+# None, "hold" or "toggle" - None disable, hold until the accept coins signal is ready, toggle will hold for VEND_TOGGLE_TIME (s)
+VEND_MODE = "toggle"
+VEND_TOGGLE_TIME = 1
+VEND_REVERSED = False  # set to True if the vend relay is active low
+ACCEPT_COINS_REVERSED = False  # set to True if the accept coins signal is active low
+
 # Pin Configuration
 BUZZER_PIN = 26  # IO num, not pin num
 LED_PIN = None  # 27  # IO num, not pin num
 RGB_LED_PIN = 16  # IO num, not pin num - optional, but recommended for interlocks
 RGB_LED_COUNT = 30  # number of LEDs in the strip
 LOCK_PIN = 13  # IO num, not pin num
+RELAY_PIN = 17  # IO num, not pin num
+ACCEPT_COINS_PIN = 33  # IO num, not pin num
 SDA_PIN = 21  # IO num, not pin num
 SCL_PIN = 22  # IO num, not pin num
 

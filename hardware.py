@@ -2,12 +2,25 @@ import config
 import time
 import ulogging
 import urequests
-from machine import Pin, I2C
+from machine import WDT, Pin, I2C
 from neopixel import NeoPixel
 from ulcdscreen import LcdScreen
 
 ulogging.basicConfig(level=ulogging.INFO)
 logger = ulogging.getLogger("main")
+
+wdt = None
+
+if config.ENABLE_WDT:
+    logger.warn("Press CTRL+C to stop the WDT starting...")
+    time.sleep(3)
+    wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 5000)
+
+
+def feedWDT():
+    if config.ENABLE_WDT and wdt:
+        wdt.feed()
+
 
 DEVICE_TYPE = config.DEVICE_TYPE
 
@@ -33,8 +46,10 @@ else:
     lcd = LcdScreen(i2c, i2c_address=None)
 
 # setup other pins
-buzzer = Pin(config.BUZZER_PIN, Pin.OUT)
+buzzer_pin = Pin(config.BUZZER_PIN, Pin.OUT)
 lock_pin = Pin(config.LOCK_PIN, Pin.OUT, value=config.LOCK_REVERSED)
+vend_pin = Pin(config.RELAY_PIN, Pin.OUT, value=config.VEND_REVERSED)
+accept_coins_pin = Pin(config.ACCEPT_COINS_PIN, Pin.IN, pull=Pin.PULL_DOWN)
 led = None
 rgb_led = None
 
@@ -133,12 +148,12 @@ def led_off():
 
 def buzzer_on():
     if config.BUZZER_ENABLED:
-        buzzer.on()
+        buzzer_pin.on()
 
 
 def buzzer_off():
     if config.BUZZER_ENABLED:
-        buzzer.off()
+        buzzer_pin.off()
 
 
 def alert(rgb_return_colour=RGB_BLUE):
@@ -236,3 +251,51 @@ def interlock_power_control(status: bool):
         else:
             lock()
             return True
+
+
+def vend_on():
+    if config.VEND_REVERSED:
+        vend_pin.off()
+    else:
+        vend_pin.on()
+
+
+def vend_off():
+    if config.VEND_REVERSED:
+        vend_pin.on()
+    else:
+        vend_pin.off()
+
+
+def accept_coins():
+    if config.ACCEPT_COINS_REVERSED:
+        return not accept_coins_pin.value()
+    else:
+        return accept_coins_pin.value()
+
+
+def vend_product():
+    rgb_led_set(RGB_GREEN)
+    led_on()
+    if config.BUZZ_ON_SWIPE:
+        buzz_action()
+
+    if config.VEND_MODE == "toggle":
+        vend_on()
+        start_time = time.time()
+        while time.time() - start_time < config.VEND_TOGGLE_TIME:
+            time.sleep(0.1)
+            feedWDT()
+        vend_off()
+    elif config.VEND_MODE == "hold":
+        vend_on()
+        time.sleep(1)
+
+        # once the vend relay is on, we need to wait for the accept coins signal to go low
+        # before we can turn it off again
+        while accept_coins():
+            time.sleep(0.1)
+        vend_off()
+
+    rgb_led_set(RGB_BLUE)
+    led_off()
