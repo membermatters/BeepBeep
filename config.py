@@ -30,6 +30,8 @@ RELAY_PIN = 17  # IO num, not pin num
 ACCEPT_COINS_PIN = 33  # IO num, not pin num
 SDA_PIN = 21  # IO num, not pin num
 SCL_PIN = 22  # IO num, not pin num
+UART_RX_PIN = 12  # IO num, not pin num - used if WIEGAND_ENABLED is False
+UART_TX_PIN = 14  # IO num, not pin num - used if WIEGAND_ENABLED is False
 
 # LCD Config
 LCD_ADDR = 0x27  # I2C address of LCD display

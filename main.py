@@ -2,7 +2,7 @@ import network
 import config
 import ulogging
 import time
-from machine import WDT, reset
+from machine import reset
 import ubinascii
 import json
 import uwebsockets.client
@@ -83,7 +83,7 @@ if config.WIEGAND_ENABLED:
 else:
     from urdm6300.urdm6300 import Rdm6300
 
-    rfid_reader = Rdm6300()
+    rfid_reader = Rdm6300(rx=config.UART_RX_PIN, tx=config.UART_TX_PIN)
 
 
 try:
@@ -126,7 +126,7 @@ if not sta_if.isconnected():
     sta_if.connect(config.WIFI_SSID, config.WIFI_PASS)
 
     while not sta_if.isconnected():
-        if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 20000:
+        if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 10000:
             logger.warn("Took too long to wait for WiFi!")
             logger.warn(
                 "The ESP32 should continue trying to connect in the background."
@@ -165,10 +165,11 @@ last_rfid_sync = time.ticks_ms()
 
 
 def setup_websocket_connection():
-    global websocket, led_ring, last_pong
+    global websocket, last_pong
 
     if not sta_if.isconnected():
         logger.warn("WiFi not connected...")
+        return
 
     WS_URL = f"{config.PORTAL_WS_URL}/{config.DEVICE_TYPE}/{local_mac}"
 
@@ -189,6 +190,8 @@ def setup_websocket_connection():
     except Exception as e:
         logger.error("Couldn't connect to websocket!")
         logger.error(str(e))
+        hardware.lcd.clear()
+        hardware.lcd.print("WS Connect Fail")
 
 
 def save_tags(new_tags):
@@ -199,8 +202,8 @@ def save_tags(new_tags):
         authorised_rfid_tags = new_tags
         logger.info("Got %s tags!", len(authorised_rfid_tags))
         # save the tags to flash
-        with open("tags.json", "w") as new_tags:
-            json.dump(authorised_rfid_tags, new_tags)
+        with open("tags.json", "w") as tags_file:
+            json.dump(authorised_rfid_tags, tags_file)
             logger.debug("Saved tags to flash")
 
         logger.debug("Syncing tags done!")
@@ -227,7 +230,6 @@ def log_door_swipe(card_id, rejected=False, locked_out=False):
     except Exception as e:
         logger.warn("Exception when logging access!")
         logger.error(e)
-        pass
 
 
 def interlock_end_session():
@@ -308,9 +310,13 @@ def handle_swipe_interlock(card: str):
         interlock_end_session()
 
 
-def handle_swipe_memberbucks(card: str):
+def handle_swipe_memberbucks(card_id: str):
     # attempt to debit the card
-    debit_packet = {"command": "debit", "card_id": card, "amount": config.VEND_PRICE}
+    debit_packet = {
+        "command": "debit",
+        "card_id": card_id,
+        "amount": config.VEND_PRICE / 100,
+    }
     try:
         websocket.send(json.dumps(debit_packet))
         hardware.lcd.clear()
@@ -342,15 +348,14 @@ hardware.rgb_led_set(hardware.RGB_BLUE)
 
 
 def print_device_standby_message():
-    if config.DEVICE_TYPE == "interlock":
+    if config.DEVICE_TYPE in ["interlock", "door"]:
         hardware.lcd.clear()
-        hardware.lcd.print("Swipe To Unlock")
-    elif config.DEVICE_TYPE == "door":
-        hardware.lcd.clear()
-        hardware.lcd.print("Swipe To Unlock")
+        hardware.lcd.print("Swipe To Unlock! ")
+        hardware.lcd.print_rocket()
     elif config.DEVICE_TYPE == "memberbucks":
         hardware.lcd.clear()
-        hardware.lcd.print("Swipe To Pay")
+        hardware.lcd.print("Coming Soon! ")
+        hardware.lcd.print_rocket()
 
 
 last_card_id = None
@@ -359,6 +364,29 @@ print_device_standby_message()
 while True:
     hardware.feedWDT()
     try:
+        if card := rfid_reader.read_card():
+            card = str(card)
+            logger.info(f"got a card: {card}")
+
+            if config.BUZZ_ON_SWIPE:
+                hardware.buzz_card_read()
+
+            if config.DEVICE_TYPE == "door":
+                handle_swipe_door(card)
+
+            if config.DEVICE_TYPE == "interlock":
+                handle_swipe_interlock(card)
+
+            if config.DEVICE_TYPE == "memberbucks":
+                handle_swipe_memberbucks(card)
+
+            # dedupe card reads; keep looping until we've cleared the buffer
+            while True:
+                if not rfid_reader.read_card():
+                    break
+            last_card_id = card
+            card = None
+
         # every 10 seconds run cron tasks
         cron_period = 10 * 1000
 
@@ -366,25 +394,32 @@ while True:
             ten_second_cron_update = time.ticks_ms()
             gc.collect()
 
+            # if we've missed at least 3 consecutive pongs, then reconnect
+            if time.ticks_diff(time.ticks_ms(), last_pong) > cron_period * 4:
+                websocket = None
+                logger.info(
+                    "Websocket not open (pong timeout), trying to reconnect."
+                )
+                setup_websocket_connection()
+                print_device_standby_message()
+
+                # this stops us trying to reconnect every 10 seconds and holding up the main loop
+                last_pong = time.ticks_ms()
+
+                # skip the rest of this event loop
+                continue
+
             if websocket and websocket.open:
-                logger.debug("sending ping")
-
-                # if we've missed at least 3 consecutive pongs, then reconnect
-                if time.ticks_diff(time.ticks_ms(), last_pong) > cron_period * 4:
-                    websocket = None
-                    logger.info(
-                        "Websocket not open (pong timeout), trying to reconnect."
-                    )
-                    setup_websocket_connection()
-                    print_device_standby_message()
-                    # skip the rest of this event loop
-                    continue
-
                 try:
+                    logger.debug("sending ping")
                     websocket.send(json.dumps({"command": "ping"}))
                 except:
                     websocket = None
                     setup_websocket_connection()
+
+                    # this stops us trying to reconnect every 10 seconds and holding up the main loop
+                    last_pong = time.ticks_ms()
+
                     # skip the rest of this event loop
                     continue
 
@@ -408,8 +443,7 @@ while True:
                 setup_websocket_connection()
 
         if websocket and websocket.open:
-            data = websocket.recv()
-            if data:
+            if data := websocket.recv():
                 logger.debug("Got websocket packet:")
                 logger.debug(data)
 
@@ -418,6 +452,7 @@ while True:
 
                     if data.get("authorised") is not None:
                         logger.info("Got authorisation packet.")
+                        print_device_standby_message()
 
                     elif data.get("command") == "pong":
                         last_pong = time.ticks_ms()
@@ -442,9 +477,8 @@ while True:
                         save_state(STATE)
 
                     elif data.get("command") == "bump" and config.DEVICE_TYPE == "door":
-                        if config.DEVICE_TYPE == "door":
-                            logger.info("Bumping Door!")
-                            hardware.door_swipe_success()
+                        logger.info("Bumping Door!")
+                        hardware.door_swipe_success()
 
                     elif data.get("command") == "sync":
                         tags_hash_new = data.get("hash")
@@ -454,7 +488,7 @@ while True:
                             save_tags(data.get("tags"))
                             STATE["tag_hash"] = tags_hash_new
                             save_state(STATE)
-                            logger.info("Saved tags with hash: " + tags_hash_new)
+                            logger.info(f"Saved tags with hash: {tags_hash_new}")
                         else:
                             logger.info("Tags hash unchanged, skipping save.")
 
@@ -475,13 +509,13 @@ while True:
                             hardware.unlock()
 
                     elif data.get("command") == "lock":
-                        if config.DEVICE_TYPE == "interlock":
-                            logger.info("Turning off interlock from manual request!")
-                            interlock_end_session()
-                        elif config.DEVICE_TYPE == "door":
+                        if config.DEVICE_TYPE == "door":
                             logger.info("Locking device from manual request!")
                             hardware.lock()
 
+                        elif config.DEVICE_TYPE == "interlock":
+                            logger.info("Turning off interlock from manual request!")
+                            interlock_end_session()
                     elif data.get("command") == "interlock_session_start":
                         if config.DEVICE_TYPE == "interlock":
                             logger.info("Turning on interlock from new session!")
@@ -510,21 +544,19 @@ while True:
                         success = data.get("success")
                         balance = data.get("balance")
 
-                        if balance:
-                            balance = "$" + str(round(float(balance) / 100, 2))
-                        else:
-                            balance = "Unknown"
-
+                        balance = (
+                            f"${str(round(float(balance) / 100, 2))}"
+                            if balance
+                            else "Unknown"
+                        )
                         if success:
                             logger.info("Debit successful!")
                             hardware.lcd.clear()
-                            hardware.lcd.print("Vend Success! ")
                             hardware.lcd.print_rocket()
-                            hardware.lcd.print(f" Balance: {balance})")
+                            hardware.lcd.print(f" Success! {balance}")
                             hardware.buzz_action()
                             hardware.vend_product()
                             time.sleep(5)
-                            print_device_standby_message()
                         else:
                             logger.info("Debit failed!")
                             hardware.lcd.clear()
@@ -540,8 +572,7 @@ while True:
                             hardware.feedWDT()
                             time.sleep(5)
                             hardware.rgb_led_set(hardware.RGB_BLUE)
-                            print_device_standby_message()
-
+                        print_device_standby_message()
                     else:
                         logger.warn("Unknown websocket packet!")
                         logger.warn(json.dumps(data))
@@ -552,7 +583,7 @@ while True:
 
         if config.ENABLE_BACKUP_HTTP_SERVER:
             # backup http server for manually bumping a door from the local network
-            for event in poll.poll(1):
+            for _ in poll.poll(1):
                 conn, addr = httpserver.sock.accept()
                 request = str(conn.recv(2048))
                 hardware.rgb_led_set(hardware.RGB_PURPLE)
@@ -561,36 +592,10 @@ while True:
                 time.sleep(0.1)
                 hardware.rgb_led_set(hardware.RGB_BLUE)
                 httpserver.client_response(conn)
-                if "/bump?secret=" + config.API_SECRET in request:
+                if f"/bump?secret={config.API_SECRET}" in request:
                     logger.info("got authenticated bump request")
                     hardware.door_swipe_success()
                     break
-
-        # try to read a card
-        card = rfid_reader.read_card()
-
-        if card:
-            card = str(card)
-            logger.info("got a card: " + card)
-
-            if config.BUZZ_ON_SWIPE:
-                hardware.buzz_card_read()
-
-            if config.DEVICE_TYPE == "door":
-                handle_swipe_door(card)
-
-            if config.DEVICE_TYPE == "interlock":
-                handle_swipe_interlock(card)
-
-            if config.DEVICE_TYPE == "memberbucks":
-                handle_swipe_memberbucks(card)
-
-            # dedupe card reads; keep looping until we've cleared the buffer
-            while True:
-                if not rfid_reader.read_card():
-                    break
-            last_card_id = card
-            card = None
 
     except KeyboardInterrupt as e:
         # turn off the LED and buzzer in case they were left on

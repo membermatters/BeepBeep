@@ -281,6 +281,9 @@ def vend_product():
         buzz_action()
 
     if config.VEND_MODE == "toggle":
+        # TODO: timeout after 60 seconds and refund the money
+        # currently we will wait forever for the accept coins signal to go low
+        # even if a drink is never vended.
         vend_on()
         start_time = time.time()
         while time.time() - start_time < config.VEND_TOGGLE_TIME:
