@@ -6,15 +6,15 @@ from machine import WDT, Pin, I2C
 from neopixel import NeoPixel
 from ulcdscreen import LcdScreen
 
-ulogging.basicConfig(level=ulogging.INFO)
-logger = ulogging.getLogger("main")
+ulogging.basicConfig(level=config.LOG_LEVEL)
+logger = ulogging.getLogger("hardware")
 
 wdt = None
 
 if config.ENABLE_WDT:
     logger.warn("Press CTRL+C to stop the WDT starting...")
     time.sleep(3)
-    wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 5000)
+    wdt = WDT(timeout=config.FIXED_UNLOCK_DELAY * 2000 + 5000)
 
 
 def feedWDT():
@@ -25,17 +25,20 @@ def feedWDT():
 DEVICE_TYPE = config.DEVICE_TYPE
 
 # setup i2c and lcd
-i2c = I2C(0, scl=Pin(config.SCL_PIN), sda=Pin(config.SDA_PIN), freq=400000)
+i2c = None
 i2c_devices = []
 lcd = None
 
-for device in i2c.scan():
-    i2c_devices.append(device)
-    logger.debug(
-        f"Found i2c device. Decimal address: {device} | Hexa address: {hex(device)}"
-    )
+if config.SDA_PIN and config.SCL_PIN:
+    i2c = I2C(0, scl=Pin(config.SCL_PIN), sda=Pin(config.SDA_PIN), freq=400000)
 
-if config.LCD_ADDR in i2c_devices:
+    for device in i2c.scan():
+        i2c_devices.append(device)
+        logger.debug(
+            f"Found i2c device. Decimal address: {device} | Hexa address: {hex(device)}"
+        )
+
+if config.LCD_ENABLE and config.LCD_ADDR in i2c_devices:
     lcd = LcdScreen(
         i2c, i2c_address=config.LCD_ADDR, columns=config.LCD_COLS, rows=config.LCD_ROWS
     )
@@ -46,20 +49,63 @@ else:
     lcd = LcdScreen(i2c, i2c_address=None)
 
 # setup other pins
-buzzer_pin = Pin(config.BUZZER_PIN, Pin.OUT)
-lock_pin = Pin(config.LOCK_PIN, Pin.OUT, value=config.LOCK_REVERSED)
-vend_pin = Pin(config.RELAY_PIN, Pin.OUT, value=config.VEND_REVERSED)
-accept_coins_pin = Pin(config.ACCEPT_COINS_PIN, Pin.IN, pull=Pin.PULL_DOWN)
-led = None
-rgb_led = None
+buzzer = None
+reader_led = None
+lock_pin = None
+relay_pin = None
+door_sensor_pin = None
+status_led_pin = None
+in_1_pin = None
+out_1_pin = None
+aux_1_pin = None
+aux_2_pin = None
+rgb_led_pin = None
 
-if config.LED_PIN:
-    led = Pin(config.LED_PIN, Pin.OUT)
+if config.READER_BUZZER_PIN:
+    buzzer = Pin(config.READER_BUZZER_PIN, Pin.OUT)
+
+if config.READER_LED_PIN:
+    reader_led = Pin(config.READER_LED_PIN, Pin.OUT)
+
+if config.LOCK_PIN:
+    lock_pin = Pin(config.LOCK_PIN, Pin.OUT, value=config.LOCK_REVERSED)
+
+if config.RELAY_PIN:
+    relay_pin = Pin(config.RELAY_PIN, Pin.OUT, value=config.RELAY_REVERSED)
+
+if config.DOOR_SENSOR_PIN:
+    door_sensor_pin = Pin(config.DOOR_SENSOR_PIN, Pin.IN)
+
+if config.STATUS_LED_PIN:
+    status_led_pin = Pin(config.STATUS_LED_PIN, Pin.OUT)
+
+if config.IN_1_PIN:
+    in_1_pin = Pin(config.IN_1_PIN, Pin.IN)
+
+if config.OUT_1_PIN:
+    out_1_pin = Pin(config.OUT_1_PIN, Pin.OUT, value=config.OUT_1_REVERSED)
+
+if config.AUX_1_PIN:
+    aux_1_pin = Pin(config.AUX_1_PIN, Pin.IN, pull=Pin.PULL_DOWN)
+
+if config.AUX_2_PIN:
+    aux_2_pin = Pin(config.AUX_2_PIN, Pin.IN, pull=Pin.PULL_DOWN)
 
 if config.RGB_LED_PIN:
-    rgb_led = NeoPixel(
+    rgb_led_pin = NeoPixel(
         Pin(config.RGB_LED_PIN, Pin.OUT), config.RGB_LED_COUNT
     )  # create NeoPixel driver for 1 pixel
+
+
+def status_led_on():
+    if status_led_pin:
+        status_led_pin.on()
+
+
+def status_led_off():
+    if status_led_pin:
+        status_led_pin.off()
+
 
 # WS2812 uses GRB instead of RGB!
 RGB_OFF = (0, 0, 0)
@@ -74,9 +120,10 @@ RGB_PINK = (0, 200, 50)
 
 def rgb_led_set(colour):
     if config.RGB_LED_PIN:
+        logger.debug(f"Setting RGB LED to {colour}")
         for x in range(config.RGB_LED_COUNT):
-            rgb_led[x] = colour
-        rgb_led.write()
+            rgb_led_pin[x] = colour
+        rgb_led_pin.write()
 
 
 def colorwheel(pos, p=False):
@@ -123,37 +170,43 @@ def unlock():
 
 
 def led_on():
-    if config.LED_PIN:
-        if config.LED_REVERSED:
-            led.off()
+    if config.READER_LED_PIN:
+        if config.READER_LED_REVERSED:
+            reader_led.off()
             if lcd:
                 lcd.no_backlight()
         else:
-            led.on()
+            reader_led.on()
             if lcd:
                 lcd.backlight()
 
 
 def led_off():
-    if config.LED_PIN:
-        if config.LED_REVERSED:
-            led.on()
+    if config.READER_LED_PIN:
+        if config.READER_LED_REVERSED:
+            reader_led.on()
             if lcd:
                 lcd.backlight()
         else:
-            led.off()
+            reader_led.off()
             if lcd:
                 lcd.no_backlight()
 
 
 def buzzer_on():
     if config.BUZZER_ENABLED:
-        buzzer_pin.on()
+        if config.BUZZER_REVERSED:
+            buzzer.off()
+        else:
+            buzzer.on()
 
 
 def buzzer_off():
     if config.BUZZER_ENABLED:
-        buzzer_pin.off()
+        if config.BUZZER_REVERSED:
+            buzzer.on()
+        else:
+            buzzer.off()
 
 
 def alert(rgb_return_colour=RGB_BLUE):
@@ -201,22 +254,6 @@ def buzz_action():
     buzzer_off()
 
 
-def door_swipe_success():
-    # TODO: add support for a contact sensor to make locking logic more robust
-    logger.warn("Unlocking!")
-    unlock()
-    rgb_led_set(RGB_GREEN)
-    buzz_ok()
-    time.sleep(config.ACTION_BUZZ_DELAY)
-    lock()
-    rgb_led_set(RGB_BLUE)
-    logger.warn("Locking!")
-
-
-def door_swipe_denied():
-    alert()
-
-
 def interlock_session_started():
     rgb_led_set(RGB_GREEN)
     led_on()
@@ -253,25 +290,60 @@ def interlock_power_control(status: bool):
             return True
 
 
-def vend_on():
-    if config.VEND_REVERSED:
-        vend_pin.off()
+def relay_on():
+    if config.RELAY_REVERSED:
+        relay_pin.off()
     else:
-        vend_pin.on()
+        relay_pin.on()
 
 
-def vend_off():
-    if config.VEND_REVERSED:
-        vend_pin.on()
+def relay_off():
+    if config.RELAY_REVERSED:
+        relay_pin.on()
     else:
-        vend_pin.off()
+        relay_pin.off()
 
 
-def accept_coins():
-    if config.ACCEPT_COINS_REVERSED:
-        return not accept_coins_pin.value()
+def out_1_on():
+    if config.OUT_1_REVERSED:
+        out_1_pin.off()
     else:
-        return accept_coins_pin.value()
+        out_1_pin.on()
+
+
+def out_1_off():
+    if config.RELAY_REVERSED:
+        relay_pin.on()
+    else:
+        relay_pin.off()
+
+
+def get_door_sensor_state():
+    if config.DOOR_SENSOR_REVERSED:
+        return not door_sensor_pin.value()
+    else:
+        return door_sensor_pin.value()
+
+
+def get_in_1_state():
+    if config.IN_1_REVERSED:
+        return not in_1_pin.value()
+    else:
+        return in_1_pin.value()
+
+
+def get_aux_1_state():
+    if config.AUX_1_REVERSED:
+        return not aux_1_pin.value()
+    else:
+        return aux_1_pin.value()
+
+
+def get_aux_2_state():
+    if config.AUX_2_REVERSED:
+        return not aux_2_pin.value()
+    else:
+        return aux_2_pin.value()
 
 
 def vend_product():
@@ -284,21 +356,25 @@ def vend_product():
         # TODO: timeout after 60 seconds and refund the money
         # currently we will wait forever for the accept coins signal to go low
         # even if a drink is never vended.
-        vend_on()
+        relay_on()
+        unlock()
         start_time = time.time()
         while time.time() - start_time < config.VEND_TOGGLE_TIME:
             time.sleep(0.1)
             feedWDT()
-        vend_off()
+        relay_off()
+        lock()
     elif config.VEND_MODE == "hold":
-        vend_on()
+        relay_on()
+        unlock()
         time.sleep(1)
 
-        # once the vend relay is on, we need to wait for the accept coins signal to go low
-        # before we can turn it off again
-        while accept_coins():
+        # once the vend relay is on, we need to wait for the accept coins (door sensor)
+        # signal to go low before we can turn it off again
+        while get_door_sensor_state():
             time.sleep(0.1)
-        vend_off()
+        relay_off()
+        lock()
 
     rgb_led_set(RGB_BLUE)
     led_off()
