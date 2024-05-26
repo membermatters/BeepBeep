@@ -19,6 +19,8 @@ The firmware in this repository is exclusively designed to work with the BeepBee
 The following configuration is currently supported:
 
 - [BeepBeep v1.0.1 PCB](/hardware/v1.0.1/)
+    - You can view the OSHWLAB page [here](https://oshwlab.com/member-matters/beepbeep).
+    - It is recommended to order boards from JLCPCB using their SMT assembly service.
 - BeepBeep v1.x.x firmware
 - Micropython v1.22.0
 
