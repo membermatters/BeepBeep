@@ -51,17 +51,20 @@ class Logger:
         return level >= self.level
 
     def log(self, level, msg, *args):
-        dest = self
-        while dest.level == NOTSET and dest.parent:
-            dest = dest.parent
-        if level >= dest.level:
-            record = LogRecord(
-                self.name, level, None, None, msg, args, None, None, None
-            )
+        if isinstance(msg, Exception):
+            self.exc(msg, "Exception Occurred: ", *args)
+        else:
+            dest = self
+            while dest.level == NOTSET and dest.parent:
+                dest = dest.parent
+            if level >= dest.level:
+                record = LogRecord(
+                    self.name, level, None, None, msg, args, None, None, None
+                )
 
-            if dest.handlers:
-                for hdlr in dest.handlers:
-                    hdlr.emit(record)
+                if dest.handlers:
+                    for hdlr in dest.handlers:
+                        hdlr.emit(record)
 
     def debug(self, msg, *args):
         self.log(DEBUG, msg, *args)
@@ -140,7 +143,8 @@ def basicConfig(level=INFO, filename=None, stream=None, format=None, style="%"):
     else:
         h = StreamHandler(stream)
     h.setFormatter(
-        Formatter(format or "%(levelname)s:%(name)s:%(message)s", style=style))
+        Formatter(format or "%(levelname)s:%(name)s:%(message)s", style=style)
+    )
     root.handlers.clear()
     root.addHandler(h)
 

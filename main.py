@@ -1,40 +1,29 @@
-import uwiegand
 import network
 import config
 import ulogging
-from urdm6300.urdm6300 import Rdm6300
-import time
-from machine import WDT, reset
+import time, utime
+from machine import reset
 import ubinascii
 import json
 import uwebsockets.client
-import uselect
 import hardware
-import httpserver
 import utils
+import gc
 
-ulogging.basicConfig(level=ulogging.INFO)
+if config.ENABLE_BACKUP_HTTP_SERVER:
+    import httpserver
+
+ulogging.basicConfig(level=config.LOG_LEVEL)
 logger = ulogging.getLogger("main")
 
 hardware.buzzer_off()
 hardware.rgb_led_set(hardware.RGB_OFF)
 hardware.led_off()
 
-wdt = None
-
-if config.ENABLE_WDT:
-    logger.warn("Press CTRL+C to stop the WDT starting...")
-    time.sleep(3)
-    wdt = WDT(timeout=config.UNLOCK_DELAY * 1000 + 5000)
-
 # setup is starting
 hardware.rgb_led_set(hardware.RGB_PURPLE)
 hardware.alert(rgb_return_colour=hardware.RGB_PURPLE)
-
-
-def feedWDT():
-    if config.ENABLE_WDT and wdt:
-        wdt.feed()
+hardware.lcd.print("Initialising...")
 
 
 INTERLOCK_SESSION = {
@@ -42,6 +31,59 @@ INTERLOCK_SESSION = {
     "total_kwh": 0,
 }
 STATE = {"locked_out": False, "tag_hash": ""}
+authorised_rfid_tags = []
+
+sta_if = network.WLAN(network.STA_IF)
+local_ip = None  # store our local IP address
+local_mac = ubinascii.hexlify(sta_if.config("mac")).decode()  # store our mac address
+hostname = "BeepBeep_" + local_mac
+
+logger.info("Setting hostname to: " + hostname)
+network.hostname(hostname)
+logger.info("Setting WiFi country code to: " + config.WIFI_COUNTRY_CODE)
+network.country(config.WIFI_COUNTRY_CODE)
+
+last_card_id = None
+websocket = None
+led_update = time.ticks_ms()
+ten_second_cron_update = time.ticks_ms()
+last_pong = None
+last_rfid_sync = time.ticks_ms()
+waiting_for_door_open_time = None
+door_opened_time = None
+
+
+# setup RFID
+if config.WIEGAND_ENABLED:
+    # setup wiegand reader
+    import uwiegand
+
+    rfid_reader = uwiegand.Wiegand(
+        config.WIEGAND_ZERO,
+        config.WIEGAND_ONE,
+        uid_32bit_mode=config.UID_32BIT_MODE,
+        timer_id=config.WIEGAND_TIMER_ID,
+    )
+else:
+    from urdm6300.urdm6300 import Rdm6300
+
+    rfid_reader = Rdm6300(rx=config.UART_RX_PIN, tx=config.UART_TX_PIN)
+
+try:
+    # create it if it doesn't exist
+    if not utils.file_or_dir_exists("tags.json"):
+        with open("tags.json", "w") as new_tags:
+            json.dump([], new_tags)
+
+        # if we have any saved tags, load them
+    with open("tags.json") as tags:
+        parsed_tags = json.load(tags)
+        if parsed_tags:
+            authorised_rfid_tags = parsed_tags
+            logger.info("Loaded %s saved tags from flash.", len(authorised_rfid_tags))
+except Exception as e:
+    logger.error("Could not load saved tags (unhandled error)")
+    logger.error(e)
 
 
 def save_state(state):
@@ -83,96 +125,93 @@ def get_state():
         return False
 
 
-# setup RFID
-if config.WIEGAND_ENABLED:
-    # setup wiegand reader
-    rfid_reader = uwiegand.Wiegand(
-        config.WIEGAND_ZERO, config.WIEGAND_ONE, uid_32bit_mode=config.UID_32BIT_MODE
-    )
-else:
-    rfid_reader = Rdm6300()
+def connect_wifi(silent=False):
+    global local_ip
 
+    wlan_connecting_start = time.ticks_ms()
+    led_toggle_last_update = time.ticks_ms()
+    led_toggle_last_state = False
 
-try:
-    # create it if it doesn't exist
-    if not utils.file_or_dir_exists("tags.json"):
-        with open("tags.json", "w") as new_tags:
-            json.dump([], new_tags)
+    if sta_if.isconnected():
+        sta_if.disconnect()
 
-        # if we have any saved tags, load them
-    with open("tags.json") as tags:
-        parsed_tags = json.load(tags)
-        if parsed_tags:
-            authorised_rfid_tags = parsed_tags
-            logger.info("Loaded %s saved tags from flash.", len(authorised_rfid_tags))
-except:
-    logger.error("Could not load saved tags (unhandled error)")
+    sta_if.active(False)
+    sta_if.active(True)
+    sta_if.config(pm=sta_if.PM_NONE)  # disable power management
+    sta_if.config(reconnects=-1)
+    if config.WIFI_TX_POWER:
+        sta_if.config(txpower=config.WIFI_TX_POWER)
 
-get_state()  # grab the state from the flash
+    logger.info("Connecting To WiFi...")
+    if not silent:
+        hardware.lcd.clear()
+        hardware.lcd.print("Connecting WiFi")
+    hardware.status_led_off()
+    try:
+        sta_if.connect(config.WIFI_SSID, config.WIFI_PASS)
+    except OSError as e:
+        logger.error(e)
 
-# setup wifi
-wlan = network.WLAN(network.STA_IF)
-local_ip = None  # store our local IP address
-local_mac = ubinascii.hexlify(wlan.config("mac")).decode()  # store our mac address
-
-wlan.active(True)
-wlan.config(dhcp_hostname="MM_Controller_" + local_mac, txpower=config.TX_POWER)
-
-wlan_connecting_start = time.ticks_ms()
-led_toggle_last_update = time.ticks_ms()
-led_toggle_last_state = False
-
-if not wlan.isconnected():
-    logger.info("Connecting to network...")
-    wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
-    while not wlan.isconnected():
-        feedWDT()
-
-        if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 20000:
-            logger.warn("Took too long to wait for WiFi!")
-            logger.warn(
-                "The ESP32 should continue trying to connect in the background."
-            )
-            hardware.led_off()
-            hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
-            break
-
-        if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
-            led_toggle_last_update = time.ticks_ms()
-
-            if led_toggle_last_state:
+    if not silent:
+        while not sta_if.isconnected():
+            time.sleep_ms(100)
+            hardware.feedWDT()
+            if time.ticks_diff(time.ticks_ms(), wlan_connecting_start) > 10000:
+                logger.warn("Took too long to wait for WiFi!")
+                logger.warn(
+                    "The ESP32 should continue trying to connect in the background."
+                )
                 hardware.led_off()
-                hardware.rgb_led_set(hardware.RGB_OFF)
-                led_toggle_last_state = False
+                hardware.status_led_off()
+                hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
+                return False
 
-            else:
-                hardware.led_on()
-                hardware.rgb_led_set(hardware.RGB_PURPLE)
-                led_toggle_last_state = True
+            if time.ticks_diff(time.ticks_ms(), led_toggle_last_update) > 250:
+                led_toggle_last_update = time.ticks_ms()
 
-    hardware.led_off()
-    hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
+                if led_toggle_last_state:
+                    hardware.led_off()
+                    hardware.status_led_off()
+                    hardware.rgb_led_set(hardware.RGB_OFF)
+                    led_toggle_last_state = False
 
-    local_ip = wlan.ifconfig()[0]
-    logger.info("Local IP: " + local_ip)
-    logger.info("Local MAC: " + local_mac)
+                else:
+                    hardware.led_on()
+                    hardware.status_led_on()
+                    hardware.rgb_led_set(hardware.RGB_PURPLE)
+                    led_toggle_last_state = True
+
+        hardware.led_off()
+        hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
+
+    if sta_if.isconnected():
+        hardware.status_led_on()
+        new_ip = sta_if.ifconfig()[0]
+        if new_ip != local_ip:
+            local_ip = new_ip
+            logger.info("New Local IP: " + local_ip)
+        return True
+    else:
+        hardware.status_led_off()
+        return False
 
 
-websocket = None
-led_update = time.ticks_ms()
-ten_second_cron_update = time.ticks_ms()
-last_pong = None
-last_rfid_sync = time.ticks_ms()
+def connect_websocket():
+    global websocket, last_pong
 
-
-def setup_websocket_connection():
-    global websocket, led_ring, last_pong
+    if not sta_if.isconnected():
+        logger.warn("Tried to setup websocket but WiFi is not connected...")
+        connect_wifi(silent=True)
+        return
 
     WS_URL = f"{config.PORTAL_WS_URL}/{config.DEVICE_TYPE}/{local_mac}"
 
     try:
-        logger.info("connecting to websocket...")
-        logger.info("WS_URL: " + WS_URL)
+        logger.info("Connecting to websocket...")
+        logger.debug("WS_URL: " + WS_URL)
+        hardware.status_led_off()
+        hardware.lcd.clear()
+        hardware.lcd.print("Connecting WS")
         websocket = uwebsockets.client.connect(WS_URL)
         last_pong = time.ticks_ms()
 
@@ -181,10 +220,14 @@ def setup_websocket_connection():
 
         ip_packet = {"command": "ip_address", "ip_address": local_ip}
         websocket.send(json.dumps(ip_packet))
+        hardware.status_led_on()
 
     except Exception as e:
         logger.error("Couldn't connect to websocket!")
-        logger.error(str(e))
+        logger.error(e)
+        hardware.lcd.clear()
+        hardware.lcd.print("WS Connect Fail")
+        hardware.status_led_off()
 
 
 def save_tags(new_tags):
@@ -195,8 +238,8 @@ def save_tags(new_tags):
         authorised_rfid_tags = new_tags
         logger.info("Got %s tags!", len(authorised_rfid_tags))
         # save the tags to flash
-        with open("tags.json", "w") as new_tags:
-            json.dump(authorised_rfid_tags, new_tags)
+        with open("tags.json", "w") as tags_file:
+            json.dump(authorised_rfid_tags, tags_file)
             logger.debug("Saved tags to flash")
 
         logger.debug("Syncing tags done!")
@@ -207,23 +250,26 @@ def save_tags(new_tags):
 
 
 def log_door_swipe(card_id, rejected=False, locked_out=False):
-    logger.info("Logging door swipe!")
+    success_string = "failed" if rejected or locked_out else "successful"
+    logger.info(f"Logging {success_string} door swipe!")
 
-    try:
-        if rejected:
-            websocket.send(
-                json.dumps({"command": "log_access_denied", "card_id": card_id})
-            )
-        elif locked_out:
-            websocket.send(
-                json.dumps({"command": "log_access_locked_out", "card_id": card_id})
-            )
-        else:
-            websocket.send(json.dumps({"command": "log_access", "card_id": card_id}))
-    except Exception as e:
-        logger.warn("Exception when logging access!")
-        logger.error(e)
-        pass
+    if websocket:
+        try:
+            if rejected:
+                websocket.send(
+                    json.dumps({"command": "log_access_denied", "card_id": card_id})
+                )
+            elif locked_out:
+                websocket.send(
+                    json.dumps({"command": "log_access_locked_out", "card_id": card_id})
+                )
+            else:
+                websocket.send(
+                    json.dumps({"command": "log_access", "card_id": card_id})
+                )
+        except Exception as e:
+            logger.warn(f"Exception when logging {success_string} access!")
+            logger.error(e)
 
 
 def interlock_end_session():
@@ -240,8 +286,10 @@ def interlock_end_session():
                 "card_id": card,
             }
             websocket.send(json.dumps(interlock_packet))
-        except:
+        except Exception as e:
             hardware.alert()
+            logger.error("Failed to end interlock session!")
+            logger.error(e)
 
     INTERLOCK_SESSION["session_id"] = None
     INTERLOCK_SESSION["total_kwh"] = 0
@@ -250,31 +298,21 @@ def interlock_end_session():
 
 
 def handle_swipe_door(card: str):
+    global authorised_rfid_tags
     hardware.buzz_card_read()
 
     if card in authorised_rfid_tags:
         if STATE["locked_out"]:
-            try:
-                log_door_swipe(card, locked_out=True)
-            except:
-                pass
-            hardware.door_swipe_denied()
+            log_door_swipe(card, locked_out=True)
+            hardware.alert()
 
         else:
-            # if there's an issue logging the swipe, open the door anyway
-            try:
-                log_door_swipe(card)
-            except:
-                pass
-            # TODO: check if door was manually unlocked and only unlock on a double swipe
-            hardware.door_swipe_success()
+            log_door_swipe(card)
+            unlock_door()
 
     else:
-        try:
-            log_door_swipe(card, rejected=True)
-        except:
-            pass
-        hardware.door_swipe_denied()
+        log_door_swipe(card, rejected=True)
+        hardware.alert()
 
 
 def handle_swipe_interlock(card: str):
@@ -286,7 +324,9 @@ def handle_swipe_interlock(card: str):
         }
         try:
             websocket.send(json.dumps(interlock_packet))
-        except:
+        except Exception as e:
+            logger.error("Failed to start interlock session!")
+            logger.error(e)
             hardware.alert()
 
     # turn off the interlock if it was manually turned on by the system
@@ -296,7 +336,9 @@ def handle_swipe_interlock(card: str):
         try:
             websocket.send(json.dumps(interlock_packet))
             interlock_end_session()
-        except:
+        except Exception as e:
+            logger.error("Failed to turn off interlock!")
+            logger.error(e)
             hardware.alert()
 
     # end the current interlock session
@@ -304,11 +346,71 @@ def handle_swipe_interlock(card: str):
         interlock_end_session()
 
 
-def handle_swipe_memberbucks(card: str):
-    pass
+def handle_swipe_memberbucks(card_id: str):
+    # attempt to debit the card
+    debit_packet = {
+        "command": "debit",
+        "card_id": card_id,
+        "amount": config.VEND_PRICE / 100,
+    }
+    try:
+        websocket.send(json.dumps(debit_packet))
+        hardware.lcd.clear()
+        hardware.lcd.print("Please Wait... ")
+        hardware.lcd.blink()
+    except Exception as e:
+        logger.error("Failed to send debit packet!")
+        logger.error(e)
+        hardware.alert()
 
+
+def print_device_standby_message():
+    if config.DEVICE_TYPE in ["interlock", "door"]:
+        hardware.lcd.clear()
+        hardware.lcd.print("Swipe To Unlock! ")
+        hardware.lcd.print_rocket()
+    elif config.DEVICE_TYPE == "memberbucks":
+        hardware.lcd.clear()
+        hardware.lcd.print("Coming Soon! ")
+        hardware.lcd.print_rocket()
+
+
+def unlock_door():
+    global waiting_for_door_open_time
+
+    hardware.unlock()
+    hardware.relay_on()
+    logger.warn("Unlocked!")
+    hardware.lcd.print("Door Unlocked!")
+    hardware.rgb_led_set(hardware.RGB_GREEN)
+    hardware.buzz_ok(flash_led=False)
+
+    if config.DOOR_SENSOR_ENABLED:
+        waiting_for_door_open_time = time.ticks_ms()
+        print_device_standby_message()
+    else:
+        time.sleep(config.FIXED_UNLOCK_DELAY)
+        lock_door()
+        hardware.relay_off()
+
+
+def lock_door():
+    global waiting_for_door_open_time
+
+    waiting_for_door_open_time = None
+    hardware.lock()
+    hardware.relay_off()
+    logger.warn("Locked!")
+    print_device_standby_message()
+
+
+get_state()  # grab the state from the flash
+connect_wifi()  # connect to wifi
+connect_websocket()  # connect to the websocket
 
 if config.ENABLE_BACKUP_HTTP_SERVER:
+    import uselect
+
     # try to set up the http server
     if not httpserver.setup_http_server():
         logger.error("FAILED to setup http server on startup :(")
@@ -318,44 +420,126 @@ if config.ENABLE_BACKUP_HTTP_SERVER:
 else:
     logger.warning("Backup http server disabled!")
 
-setup_websocket_connection()
-
 logger.info("Starting main loop...")
 hardware.led_on()
 time.sleep(0.5)
 hardware.led_off()
 hardware.rgb_led_set(hardware.RGB_BLUE)
 
-last_card_id = None
+
+print_device_standby_message()
+
+door_previous_state = hardware.get_door_sensor_state()
+in_1_previous_state = hardware.get_in_1_state()
+wifi_status_led_toggle = False
+wifi_status_led_update = time.ticks_ms()
+
+hardware.out_1_on()
 
 while True:
-    feedWDT()
-    try:
-        # every 10 seconds run cron tasks
-        cron_period = 10 * 1000
+    hardware.feedWDT()
+    if in_1_previous_state != hardware.get_in_1_state():
+        in_1_previous_state = hardware.get_in_1_state()
+        logger.info(f"In 1 sensor state changed to {in_1_previous_state}")
 
-        if time.ticks_diff(time.ticks_ms(), ten_second_cron_update) > cron_period:
+    if door_previous_state != hardware.get_door_sensor_state():
+        door_previous_state = hardware.get_door_sensor_state()
+        logger.info(f"Door sensor state changed to {door_previous_state}")
+        if door_previous_state:
+            door_opened_time = time.ticks_ms()
+        else:
+            door_opened_time = None
+
+    if waiting_for_door_open_time:
+        if (
+            time.ticks_diff(time.ticks_ms(), waiting_for_door_open_time)
+            > config.DOOR_SENSOR_TIMEOUT * 1000
+        ):
+            logger.info("Door sensor timeout! Locking again.")
+            lock_door()
+
+        else:
+            # if the door has been opened, let's lock it immediately
+            if hardware.get_door_sensor_state():
+                logger.info("Door opened while waiting, locking in 0.5s.")
+                time.sleep(0.5)
+                lock_door()
+
+        print_device_standby_message()
+
+    # if the door has been open too long
+    if door_opened_time and config.DOOR_OPEN_ALARM_TIMEOUT:
+        if (
+            time.ticks_diff(time.ticks_ms(), door_opened_time)
+            > config.DOOR_OPEN_ALARM_TIMEOUT * 1000
+        ):
+            logger.warn("Door left open alarm!")
+            hardware.lcd.clear()
+            hardware.lcd.print("Door Left Open!")
+            hardware.buzzer_on()
+
+    try:
+        if card := rfid_reader.read_card():
+            card = str(card)
+            logger.info(f"Got a card: {card}")
+
+            if config.BUZZ_ON_SWIPE:
+                hardware.buzz_card_read()
+
+            if config.DEVICE_TYPE == "door":
+                handle_swipe_door(card)
+
+            elif config.DEVICE_TYPE == "interlock":
+                handle_swipe_interlock(card)
+
+            elif config.DEVICE_TYPE == "memberbucks":
+                handle_swipe_memberbucks(card)
+
+            # dedupe card reads; keep looping until we've cleared the buffer
+            # while not rfid_reader.read_card():
+            #     pass
+            last_card_id = card
+            card = None
+
+        # if WiFi still isn't connected, flash the wifi LED
+        if not sta_if.isconnected():
+            if time.ticks_diff(time.ticks_ms(), wifi_status_led_update) > 250:
+                wifi_status_led_update = time.ticks_ms()
+
+                if wifi_status_led_toggle:
+                    hardware.status_led_off()
+                    wifi_status_led_toggle = False
+
+                else:
+                    hardware.status_led_on()
+                    wifi_status_led_toggle = True
+
+        if (
+            time.ticks_diff(time.ticks_ms(), ten_second_cron_update)
+            > config.CRON_PERIOD
+        ):
             ten_second_cron_update = time.ticks_ms()
+            gc.collect()
+
+            # if we've missed at least 3 consecutive pongs, then reconnect
+            if time.ticks_diff(time.ticks_ms(), last_pong) > config.CRON_PERIOD * 3:
+                websocket = None
+                logger.info("Websocket not open (pong timeout), trying to reconnect.")
+                print_device_standby_message()
+
+                # this stops us trying to reconnect every 10 seconds and holding up the main loop
+                last_pong = time.ticks_ms()
 
             if websocket and websocket.open:
-                logger.debug("sending ping")
-
-                # if we've missed at least 3 consecutive pongs, then reconnect
-                if time.ticks_diff(time.ticks_ms(), last_pong) > cron_period * 4:
-                    websocket = None
-                    logger.info(
-                        "Websocket not open (pong timeout), trying to reconnect."
-                    )
-                    setup_websocket_connection()
-                    # skip the rest of this event loop
-                    continue
-
                 try:
+                    logger.debug("sending ping")
                     websocket.send(json.dumps({"command": "ping"}))
-                except:
+                    hardware.status_led_on()
+                except Exception as e:
                     websocket = None
-                    setup_websocket_connection()
-                    # skip the rest of this event loop
+                    logger.error("Websocket not open, trying to reconnect.")
+                    logger.error(e)
+                    hardware.status_led_off()
                     continue
 
                 if (
@@ -370,16 +554,21 @@ while True:
                     }
                     try:
                         websocket.send(json.dumps(interlock_packet))
-                    except:
+                    except Exception as e:
+                        logger.error("Failed to send interlock session update!")
+                        logger.error(e)
+                        websocket = None
                         continue
 
             else:
                 logger.info("Websocket not open, trying to reconnect.")
-                setup_websocket_connection()
+                connect_websocket()
+
+            if sta_if.isconnected():
+                local_ip = sta_if.ifconfig()[0]  # update our local IP address
 
         if websocket and websocket.open:
-            data = websocket.recv()
-            if data:
+            if data := websocket.recv():
                 logger.debug("Got websocket packet:")
                 logger.debug(data)
 
@@ -388,6 +577,7 @@ while True:
 
                     if data.get("authorised") is not None:
                         logger.info("Got authorisation packet.")
+                        print_device_standby_message()
 
                     elif data.get("command") == "pong":
                         last_pong = time.ticks_ms()
@@ -405,10 +595,15 @@ while True:
                         hardware.rgb_led_set(hardware.RGB_OFF)
                         reset()
 
+                    elif data.get("command") == "update_device_locked_out":
+                        locked_out = data.get("locked_out")
+                        logger.info(f"Updating device locked out {locked_out}!")
+                        STATE["locked_out"] = locked_out
+                        save_state(STATE)
+
                     elif data.get("command") == "bump" and config.DEVICE_TYPE == "door":
-                        if config.DEVICE_TYPE == "door":
-                            logger.info("Bumping Door!")
-                            hardware.door_swipe_success()
+                        logger.info("Bumping Door!")
+                        unlock_door()
 
                     elif data.get("command") == "sync":
                         tags_hash_new = data.get("hash")
@@ -418,7 +613,7 @@ while True:
                             save_tags(data.get("tags"))
                             STATE["tag_hash"] = tags_hash_new
                             save_state(STATE)
-                            logger.info("Saved tags with hash: " + tags_hash_new)
+                            logger.info(f"Saved tags with hash: {tags_hash_new}")
                         else:
                             logger.info("Tags hash unchanged, skipping save.")
 
@@ -426,9 +621,9 @@ while True:
                         if config.DEVICE_TYPE == "interlock":
                             logger.info("Turning on interlock from manual request!")
                             if hardware.interlock_power_control(True):
-                                INTERLOCK_SESSION[
-                                    "session_id"
-                                ] = "system"  # special state - manually turned on by the system
+                                INTERLOCK_SESSION["session_id"] = (
+                                    "system"  # special state - manually turned on by the system
+                                )
                                 hardware.interlock_session_started()
 
                             elif config.DEVICE_TYPE == "door":
@@ -439,13 +634,13 @@ while True:
                             hardware.unlock()
 
                     elif data.get("command") == "lock":
-                        if config.DEVICE_TYPE == "interlock":
-                            logger.info("Turning off interlock from manual request!")
-                            interlock_end_session()
-                        elif config.DEVICE_TYPE == "door":
+                        if config.DEVICE_TYPE == "door":
                             logger.info("Locking device from manual request!")
                             hardware.lock()
 
+                        elif config.DEVICE_TYPE == "interlock":
+                            logger.info("Turning off interlock from manual request!")
+                            interlock_end_session()
                     elif data.get("command") == "interlock_session_start":
                         if config.DEVICE_TYPE == "interlock":
                             logger.info("Turning on interlock from new session!")
@@ -468,6 +663,41 @@ while True:
                     elif data.get("command") == "interlock_session_update":
                         pass
 
+                    elif data.get("command") == "debit":
+                        hardware.lcd.reset_screen()
+                        print(data)
+                        success = data.get("success")
+                        balance = data.get("balance")
+
+                        balance = (
+                            f"${str(round(float(balance) / 100, 2))}"
+                            if balance
+                            else "Unknown"
+                        )
+                        if success:
+                            logger.info("Debit successful!")
+                            hardware.lcd.clear()
+                            hardware.lcd.print_rocket()
+                            hardware.lcd.print(f" Success! {balance}")
+                            hardware.buzz_action()
+                            hardware.vend_product()
+                            time.sleep(5)
+                        else:
+                            logger.info("Debit failed!")
+                            hardware.lcd.clear()
+                            hardware.lcd.print(f"Vend Declined :(Balance: {balance}")
+                            hardware.lcd.no_backlight()
+                            hardware.rgb_led_set(hardware.RGB_RED)
+                            time.sleep(0.25)
+                            hardware.lcd.backlight()
+                            time.sleep(0.25)
+                            hardware.lcd.no_backlight()
+                            time.sleep(0.25)
+                            hardware.lcd.backlight()
+                            hardware.feedWDT()
+                            time.sleep(5)
+                            hardware.rgb_led_set(hardware.RGB_BLUE)
+                        print_device_standby_message()
                     else:
                         logger.warn("Unknown websocket packet!")
                         logger.warn(json.dumps(data))
@@ -478,7 +708,7 @@ while True:
 
         if config.ENABLE_BACKUP_HTTP_SERVER:
             # backup http server for manually bumping a door from the local network
-            for event in poll.poll(1):
+            for _ in poll.poll(1):
                 conn, addr = httpserver.sock.accept()
                 request = str(conn.recv(2048))
                 hardware.rgb_led_set(hardware.RGB_PURPLE)
@@ -487,56 +717,37 @@ while True:
                 time.sleep(0.1)
                 hardware.rgb_led_set(hardware.RGB_BLUE)
                 httpserver.client_response(conn)
-                if "/bump?secret=" + config.API_SECRET in request:
+                if f"/bump?secret={config.API_SECRET}" in request:
                     logger.info("got authenticated bump request")
                     hardware.door_swipe_success()
                     break
-
-        # try to read a card
-        card = rfid_reader.read_card()
-
-        if card:
-            card = str(card)
-            logger.info("got a card: " + card)
-
-            if config.BUZZ_ON_SWIPE:
-                hardware.buzz_card_read()
-
-            if config.DEVICE_TYPE == "door":
-                handle_swipe_door(card)
-
-            if config.DEVICE_TYPE == "interlock":
-                handle_swipe_interlock(card)
-
-            if config.DEVICE_TYPE == "memberbucks":
-                handle_swipe_memberbucks(card)
-
-            # dedupe card reads; keep looping until we've cleared the buffer
-            while True:
-                if not rfid_reader.read_card():
-                    break
-            last_card_id = card
-            card = None
 
     except KeyboardInterrupt as e:
         # turn off the LED and buzzer in case they were left on
         hardware.led_off()
         hardware.rgb_led_set(hardware.RGB_WHITE)
         hardware.buzzer_off()
+        hardware.status_led_off()
+        hardware.lcd.clear()
+        hardware.lcd.print("KeybInt Stopped.")
 
         raise e
 
     except Exception as e:
-        # turn off the LED and buzzer in case they were left on
-        hardware.led_off()
-        hardware.rgb_led_set(hardware.RGB_WHITE)
-        hardware.buzzer_off()
-
         if config.CATCH_ALL_EXCEPTIONS:
-            print(
-                "excepted, but config.CATCH_ALL_EXCEPTIONS is enabled so ignoring :( "
+            logger.error(
+                "excepted, but config.CATCH_ALL_EXCEPTIONS is enabled so ignoring :("
             )
-            print(e)
-            continue
+            logger.error(e)
         else:
+            logger.error(
+                "excepted, but config.CATCH_ALL_EXCEPTIONS is disabled so throwing :o"
+            )
+            logger.error(e)
+            hardware.lcd.clear()
+            hardware.lcd.print("Error Stopped.")
+            # turn off the LED and buzzer in case they were left on
+            hardware.led_off()
+            hardware.rgb_led_set(hardware.RGB_WHITE)
+            hardware.buzzer_off()
             raise e
