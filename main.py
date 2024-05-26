@@ -365,7 +365,6 @@ def handle_swipe_memberbucks(card_id: str):
 
 
 def print_device_standby_message():
-    hardware.rgb_led_set(hardware.RGB_RED)
     if config.DEVICE_TYPE in ["interlock", "door"]:
         hardware.lcd.clear()
         hardware.lcd.print("Swipe To Unlock! ")
@@ -380,16 +379,19 @@ def unlock_door():
     global waiting_for_door_open_time
 
     hardware.unlock()
+    hardware.relay_on()
     logger.warn("Unlocked!")
     hardware.lcd.print("Door Unlocked!")
     hardware.rgb_led_set(hardware.RGB_GREEN)
-    hardware.buzz_ok()
+    hardware.buzz_ok(flash_led=False)
+
     if config.DOOR_SENSOR_ENABLED:
         waiting_for_door_open_time = time.ticks_ms()
         print_device_standby_message()
     else:
         time.sleep(config.FIXED_UNLOCK_DELAY)
         lock_door()
+        hardware.relay_off()
 
 
 def lock_door():
@@ -397,6 +399,7 @@ def lock_door():
 
     waiting_for_door_open_time = None
     hardware.lock()
+    hardware.relay_off()
     logger.warn("Locked!")
     print_device_standby_message()
 
@@ -427,11 +430,18 @@ hardware.rgb_led_set(hardware.RGB_BLUE)
 print_device_standby_message()
 
 door_previous_state = hardware.get_door_sensor_state()
+in_1_previous_state = hardware.get_in_1_state()
 wifi_status_led_toggle = False
 wifi_status_led_update = time.ticks_ms()
 
+hardware.out_1_on()
+
 while True:
     hardware.feedWDT()
+    if in_1_previous_state != hardware.get_in_1_state():
+        in_1_previous_state = hardware.get_in_1_state()
+        logger.info(f"In 1 sensor state changed to {in_1_previous_state}")
+
     if door_previous_state != hardware.get_door_sensor_state():
         door_previous_state = hardware.get_door_sensor_state()
         logger.info(f"Door sensor state changed to {door_previous_state}")
@@ -458,7 +468,7 @@ while True:
         print_device_standby_message()
 
     # if the door has been open too long
-    if door_opened_time:
+    if door_opened_time and config.DOOR_OPEN_ALARM_TIMEOUT:
         if (
             time.ticks_diff(time.ticks_ms(), door_opened_time)
             > config.DOOR_OPEN_ALARM_TIMEOUT * 1000
@@ -466,7 +476,7 @@ while True:
             logger.warn("Door left open alarm!")
             hardware.lcd.clear()
             hardware.lcd.print("Door Left Open!")
-            hardware.alert()
+            hardware.buzzer_on()
 
     try:
         if card := rfid_reader.read_card():

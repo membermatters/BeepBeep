@@ -4,15 +4,15 @@ import ulogging
 # ========================== General Settings =============================
 # =========================================================================
 DEVICE_TYPE = "door"  # "door", "interlock" or "memberbucks"
-LOCK_REVERSED = True
+LOCK_REVERSED = False
 READER_LED_REVERSED = True
 RELAY_REVERSED = False
 DOOR_SENSOR_REVERSED = True
 DOOR_SENSOR_ENABLED = True
-DOOR_SENSOR_TIMEOUT = 10  # seconds to wait for the door to open before locking again
-DOOR_OPEN_ALARM_TIMEOUT = 20  # seconds to wait for the door to close before alarming
+DOOR_SENSOR_TIMEOUT = 15  # seconds to wait for the door to open before locking again
+DOOR_OPEN_ALARM_TIMEOUT = None  # seconds to wait for the door to close before alarming
 OUT_1_REVERSED = False
-IN_1_REVERSED = False
+IN_1_REVERSED = True
 AUX_1_REVERSED = False
 AUX_2_REVERSED = False
 FIXED_UNLOCK_DELAY = 7  # seconds to remain unlocked
@@ -72,13 +72,13 @@ WIFI_PASS = "pass"
 AUX_1_PIN = 2  # IO num, not pin num
 AUX_2_PIN = 1  # IO num, not pin num
 
-RGB_LED_PIN = AUX_2_PIN  # None, AUX_1_PIN, or AUX_2_PIN, recommended for interlocks
-STATUS_LED_PIN = 38  # IO num, not pin num
+RGB_LED_PIN = 37  # Recommended for interlocks
+STATUS_LED_PIN = 38  # On board status LED
 
-READER_LED_PIN = 4  # 27  # IO num, not pin num
+READER_LED_PIN = 4  # IO num, not pin num
 READER_BUZZER_PIN = 5  # IO num, not pin num
 RELAY_PIN = 36  # IO num, not pin num
-LOCK_PIN = 11  # IO num, not pin num
+LOCK_PIN = 14  # IO num, not pin num
 DOOR_SENSOR_PIN = 12  # IO num, not pin num
 
 OUT_1_PIN = 35  # IO num, not pin num

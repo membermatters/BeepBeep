@@ -202,7 +202,7 @@ def buzzer_on():
 
 
 def buzzer_off():
-    if config.BUZZER_ENABLED:
+    if buzzer:
         if config.BUZZER_REVERSED:
             buzzer.on()
         else:
@@ -230,15 +230,17 @@ def alert(rgb_return_colour=RGB_BLUE):
     rgb_led_set(rgb_return_colour)
 
 
-def buzz_ok():
+def buzz_ok(flash_led=True):
     buzzer_on()
-    led_on()
-    rgb_led_set(RGB_GREEN)
+    if flash_led:
+        led_on()
+        rgb_led_set(RGB_GREEN)
 
     time.sleep(1)
 
-    led_off()
-    rgb_led_set(RGB_BLUE)
+    if flash_led:
+        led_off()
+        rgb_led_set(RGB_BLUE)
     buzzer_off()
 
 
