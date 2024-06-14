@@ -37,8 +37,8 @@ class Wiegand:
         uid_32bit_mode - if True read_card() returns full 32bit mifare code, otherwise
                          if False read_card() returns only 24bit mifare code
         """
-        self._pin0 = Pin(pin0, Pin.IN)
-        self._pin1 = Pin(pin1, Pin.IN)
+        self._pin0 = Pin(pin0, Pin.IN, Pin.PULL_UP)
+        self._pin1 = Pin(pin1, Pin.IN, Pin.PULL_UP)
         self._callback = callback
         self._last_card = None
         self._next_card = 0
