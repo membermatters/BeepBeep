@@ -1,5 +1,12 @@
 import ulogging
 
+# =========================================================================
+# ============================== WARNING! =================================
+# =========================================================================
+# Do not change this file to make configuration changes. This is the
+# example config file and won't affect anything. Copy config.example.py to
+# config.py and make your changes there.
+
 
 # TODO: uncomment the correct device below to import a default config. You
 # can override any setting by specifying it again in this file.
@@ -13,17 +20,18 @@ from config.door import *
 # =========================== Portal Settings =============================
 # =========================================================================
 # Which portal instance to connect to
-# PORTAL_WS_URL = "ws://192.168.1.42:8080/api/ws/access" # local dev server
-PORTAL_WS_URL = "wss://portal.example.com/ws/access"
+# PORTAL_WS_URL = "ws://192.168.1.174:8080/api/ws/access"
+PORTAL_WS_URL = "wss://portal.brisbanemaker.space/ws/access"
 
 # Access Control Device API key from portal
-API_SECRET = "XXXXXXXX.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# API_SECRET = "DNUql8l8.8jl4VZDBU3TiQTteMpzIjQw2WzuQIDJl"  # dev
+API_SECRET = "DQWvSFI8.oKg3sJbbz3TchNB1CdCcwPp3yrLWg5JS"  # prd
 
 # =========================================================================
 # ======================== WiFi Network Settings ==========================
 # =========================================================================
-WIFI_SSID = "Makerspace WiFi"
-WIFI_PASS = "12345678"
+WIFI_SSID = "bmsiot"
+WIFI_PASS = "444422224444"
 
 # =========================================================================
 # ========================== Buzzer Settings ==============================

@@ -1,6 +1,13 @@
 from config.base import *
 
 # =========================================================================
+# ============================== WARNING! =================================
+# =========================================================================
+# Do not change this file to make configuration changes. This is a base
+# config file used for the other config files. Copy config.example.py to
+# config.py and make your changes there.
+
+# =========================================================================
 # ========================== General Settings =============================
 # =========================================================================
 DEVICE_TYPE = "memberbucks"  # "door", "interlock" or "memberbucks"
