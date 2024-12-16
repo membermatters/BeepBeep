@@ -40,7 +40,10 @@ if config.SDA_PIN and config.SCL_PIN:
 
 if config.LCD_ENABLE and config.LCD_ADDR in i2c_devices:
     lcd = LcdScreen(
-        i2c, i2c_address=config.LCD_ADDR, columns=config.LCD_COLS, rows=config.LCD_ROWS
+        i2c,
+        i2c_address=config.LCD_ADDR,
+        columns=config.LCD_COLS,
+        rows=config.LCD_ROWS,
     )
 
 else:
@@ -173,24 +176,22 @@ def led_on():
     if config.READER_LED_PIN:
         if config.READER_LED_REVERSED:
             reader_led.off()
-            if lcd:
-                lcd.no_backlight()
         else:
             reader_led.on()
-            if lcd:
-                lcd.backlight()
+
+    if lcd:
+        lcd.no_backlight()
 
 
 def led_off():
     if config.READER_LED_PIN:
         if config.READER_LED_REVERSED:
             reader_led.on()
-            if lcd:
-                lcd.backlight()
         else:
             reader_led.off()
-            if lcd:
-                lcd.no_backlight()
+
+    if lcd:
+        lcd.backlight()
 
 
 def buzzer_on():
@@ -268,13 +269,23 @@ def interlock_session_ended():
     # buzz_action()
 
 
-def interlock_power_control(status: bool):
-    tasmota_base_url = f"http://{config.TASMOTA_HOST}/cm?user={config.TASMOTA_USER}&password={config.TASMOTA_PASSWORD}&cmnd=Power%20"
+tasmota_base_url = f"http://{config.TASMOTA_HOST}/cm?user={config.TASMOTA_USER}&password={config.TASMOTA_PASSWORD}&cmnd="
 
+
+def reset_interlock_power_usage() -> bool:
+    if config.TASMOTA_HOST:
+        logger.debug("Resetting power usage from remote interlock!")
+        r = urequests.get(
+            tasmota_base_url + "Backlog%20EnergyToday%200%3B%20EnergyTotal%200%3B"
+        )
+        return True
+
+
+def interlock_power_control(status: bool) -> bool:
     if status:
         if config.TASMOTA_HOST:
             logger.info("Trying to turn ON remote interlock!")
-            r = urequests.get(tasmota_base_url + "On")
+            r = urequests.get(tasmota_base_url + f"Power%20On")
             return True
 
         else:
@@ -283,13 +294,22 @@ def interlock_power_control(status: bool):
 
     else:
         if config.TASMOTA_HOST:
-            logger.info("Trying to turn ON remote interlock!")
-            r = urequests.get(tasmota_base_url + "Off")
+            logger.info("Trying to turn OFF remote interlock!")
+            r = urequests.get(tasmota_base_url + f"Power%20Off")
             return True
 
         else:
             lock()
             return True
+
+
+def get_interlock_power_usage() -> float | None:
+    if config.TASMOTA_HOST:
+        logger.debug("Getting power usage from remote interlock!")
+        r = urequests.get(tasmota_base_url + "EnergyTotal")
+        return float(r.json()["EnergyTotal"]["Total"])
+    else:
+        None
 
 
 def relay_on():
@@ -373,7 +393,7 @@ def vend_product():
 
         # once the vend relay is on, we need to wait for the accept coins (door sensor)
         # signal to go low before we can turn it off again
-        while get_door_sensor_state():
+        while get_in_1_state():
             time.sleep(0.1)
         relay_off()
         lock()

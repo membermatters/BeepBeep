@@ -28,7 +28,7 @@ hardware.lcd.print("Initialising...")
 
 INTERLOCK_SESSION = {
     "session_id": None,  # any value == on, None == off
-    "total_kwh": 0,
+    "session_kwh": 0,
 }
 STATE = {"locked_out": False, "tag_hash": ""}
 authorised_rfid_tags = []
@@ -134,11 +134,13 @@ def connect_wifi(silent=False):
 
     if sta_if.isconnected():
         sta_if.disconnect()
+        time.sleep(0.5)
 
     sta_if.active(False)
+    time.sleep(0.5)
     sta_if.active(True)
-    sta_if.config(pm=sta_if.PM_NONE)  # disable power management
-    sta_if.config(reconnects=-1)
+    # sta_if.config(pm=sta_if.PM_NONE)  # disable power management
+    # sta_if.config(reconnects=-1)
     if config.WIFI_TX_POWER:
         sta_if.config(txpower=config.WIFI_TX_POWER)
 
@@ -161,6 +163,10 @@ def connect_wifi(silent=False):
                 logger.warn(
                     "The ESP32 should continue trying to connect in the background."
                 )
+                try:
+                    sta_if.connect(config.WIFI_SSID, config.WIFI_PASS)
+                except OSError as e:
+                    logger.error(e)
                 hardware.led_off()
                 hardware.status_led_off()
                 hardware.rgb_led_set(hardware.RGB_PURPLE)  # booting up colour
@@ -215,7 +221,10 @@ def connect_websocket():
         websocket = uwebsockets.client.connect(WS_URL)
         last_pong = time.ticks_ms()
 
-        auth_packet = {"command": "authenticate", "secret_key": config.API_SECRET}
+        auth_packet = {
+            "command": "authenticate",
+            "secret_key": config.API_SECRET,
+        }
         websocket.send(json.dumps(auth_packet))
 
         ip_packet = {"command": "ip_address", "ip_address": local_ip}
@@ -292,7 +301,7 @@ def interlock_end_session():
             logger.error(e)
 
     INTERLOCK_SESSION["session_id"] = None
-    INTERLOCK_SESSION["total_kwh"] = 0
+    INTERLOCK_SESSION["session_kwh"] = 0
     hardware.interlock_power_control(False)
     hardware.interlock_session_ended()
 
@@ -365,14 +374,19 @@ def handle_swipe_memberbucks(card_id: str):
 
 
 def print_device_standby_message():
-    if config.DEVICE_TYPE in ["interlock", "door"]:
+    if config.DEVICE_TYPE == "door":
         hardware.lcd.clear()
         hardware.lcd.print("Swipe To Unlock! ")
         hardware.lcd.print_rocket()
-    elif config.DEVICE_TYPE == "memberbucks":
+    elif config.DEVICE_TYPE == "memberbucks" or config.DEVICE_TYPE == "interlock":
         hardware.lcd.clear()
-        hardware.lcd.print("Coming Soon! ")
-        hardware.lcd.print_rocket()
+        if sta_if.isconnected():
+            if config.DEVICE_TYPE == "memberbucks":
+                hardware.lcd.print(f"${config.VEND_PRICE/100} Swipe Card")
+            else:
+                hardware.lcd.print("Swipe To Unlock!")
+        else:
+            hardware.lcd.print(f"No Connection")
 
 
 def unlock_door():
@@ -411,6 +425,10 @@ connect_websocket()  # connect to the websocket
 if config.ENABLE_BACKUP_HTTP_SERVER:
     import uselect
 
+    logger.warning(
+        "The backup http server is enabled. This is not recommended for production use!"
+    )
+
     # try to set up the http server
     if not httpserver.setup_http_server():
         logger.error("FAILED to setup http server on startup :(")
@@ -418,7 +436,7 @@ if config.ENABLE_BACKUP_HTTP_SERVER:
         poll = uselect.poll()
         poll.register(httpserver.sock, uselect.POLLIN)
 else:
-    logger.warning("Backup http server disabled!")
+    logger.debug("Backup http server disabled!")
 
 logger.info("Starting main loop...")
 hardware.led_on()
@@ -546,6 +564,9 @@ while True:
                     INTERLOCK_SESSION.get("session_id") is not None
                     and INTERLOCK_SESSION.get("session_id") != "system"
                 ):
+                    INTERLOCK_SESSION["session_kwh"] = (
+                        hardware.get_interlock_power_usage()
+                    )
                     logger.debug("Sending interlock session update")
                     interlock_packet = {
                         "command": "interlock_session_update",
@@ -646,7 +667,7 @@ while True:
                             logger.info("Turning on interlock from new session!")
 
                             INTERLOCK_SESSION["session_id"] = data.get("session_id")
-                            INTERLOCK_SESSION["total_kwh"] = 0
+                            INTERLOCK_SESSION["session_kwh"] = 0
 
                             if hardware.interlock_power_control(True):
                                 hardware.interlock_session_started()
@@ -665,7 +686,7 @@ while True:
 
                     elif data.get("command") == "debit":
                         hardware.lcd.reset_screen()
-                        print(data)
+                        logger.debug(data)
                         success = data.get("success")
                         balance = data.get("balance")
 
@@ -678,14 +699,14 @@ while True:
                             logger.info("Debit successful!")
                             hardware.lcd.clear()
                             hardware.lcd.print_rocket()
-                            hardware.lcd.print(f" Success! {balance}")
+                            hardware.lcd.print(f"Success! {balance}")
                             hardware.buzz_action()
                             hardware.vend_product()
                             time.sleep(5)
                         else:
                             logger.info("Debit failed!")
                             hardware.lcd.clear()
-                            hardware.lcd.print(f"Vend Declined :(Balance: {balance}")
+                            hardware.lcd.print(f"Declined. {balance}")
                             hardware.lcd.no_backlight()
                             hardware.rgb_led_set(hardware.RGB_RED)
                             time.sleep(0.25)
