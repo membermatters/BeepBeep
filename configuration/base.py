@@ -1,6 +1,30 @@
 import ulogging
 
 # =========================================================================
+# ============================== WARNING! =================================
+# =========================================================================
+# Do not change this file to make configuration changes. This is a base
+# config file used for the other config files. Copy configsetting.example.py
+# to configsetting.py and make your changes there.
+
+
+# =========================================================================
+# =========================== Portal Settings =============================
+# =========================================================================
+# Which portal instance to connect to
+# PORTAL_WS_URL = "ws://192.168.1.42:8080/api/ws/access" # local dev server
+PORTAL_WS_URL = "wss://portal.example.com/ws/access"
+
+# Access Control Device API key from portal
+API_SECRET = "XXXXXXXX.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# =========================================================================
+# ======================== WiFi Network Settings ==========================
+# =========================================================================
+WIFI_SSID = "Makerspace WiFi"
+WIFI_PASS = "12345678"
+
+# =========================================================================
 # ========================== General Settings =============================
 # =========================================================================
 DEVICE_TYPE = "door"  # "door", "interlock" or "memberbucks"
@@ -9,7 +33,7 @@ READER_LED_REVERSED = True
 RELAY_REVERSED = False
 DOOR_SENSOR_REVERSED = True
 DOOR_SENSOR_ENABLED = True
-DOOR_SENSOR_TIMEOUT = 15  # seconds to wait for the door to open before locking again
+DOOR_SENSOR_TIMEOUT = 5  # seconds to wait for the door to open before locking again
 DOOR_OPEN_ALARM_TIMEOUT = None  # seconds to wait for the door to close before alarming
 OUT_1_REVERSED = False
 IN_1_REVERSED = True
@@ -22,7 +46,7 @@ WIEGAND_ENABLED = True
 # =========================================================================
 # ========================== Buzzer Settings ==============================
 # =========================================================================
-BUZZER_ENABLED = False
+BUZZER_ENABLED = True
 BUZZER_REVERSED = True
 BUZZ_ON_SWIPE = True  # send a short buzz when a card is swiped
 ACTION_BUZZ_DELAY = 2  # seconds to buzz for an action (unlock, lock, etc)
@@ -39,7 +63,7 @@ TASMOTA_PASSWORD = "admin"
 # =========================================================================
 VEND_PRICE = 250  # price in cents to debit an account
 # None, "hold" or "toggle" - None disable, hold until the accept coins signal is ready, toggle will hold for VEND_TOGGLE_TIME (s)
-VEND_MODE = "toggle"
+VEND_MODE = None
 VEND_TOGGLE_TIME = 1
 
 # =========================================================================
@@ -51,22 +75,6 @@ LCD_COLS = 16  # number of columns on the LCD display
 LCD_ROWS = 2  # number of rows on the LCD display
 
 # =========================================================================
-# =========================== Portal Settings =============================
-# =========================================================================
-# Which portal instance to connect to
-PORTAL_WS_URL = "ws://192.168.1.174:8080/api/ws/access"
-# PORTAL_WS_URL = "wss://portal.brisbanemaker.space/ws/access"
-
-# Access Control Device API key from portal
-API_SECRET = "xxx"  # dev
-
-# =========================================================================
-# ======================== WiFi Network Settings ==========================
-# =========================================================================
-WIFI_SSID = "ssid"
-WIFI_PASS = "pass"
-
-# =========================================================================
 # ========================== Pin Configuration ============================
 # =========================================================================
 AUX_1_PIN = 2  # IO num, not pin num
@@ -75,8 +83,8 @@ AUX_2_PIN = 1  # IO num, not pin num
 RGB_LED_PIN = 37  # Recommended for interlocks
 STATUS_LED_PIN = 38  # On board status LED
 
-READER_LED_PIN = 4  # IO num, not pin num
-READER_BUZZER_PIN = 5  # IO num, not pin num
+READER_LED_PIN = 5  # IO num, not pin num
+READER_BUZZER_PIN = 4  # IO num, not pin num
 RELAY_PIN = 36  # IO num, not pin num
 LOCK_PIN = 14  # IO num, not pin num
 DOOR_SENSOR_PIN = 12  # IO num, not pin num
@@ -102,12 +110,12 @@ ENABLE_WDT = False
 # Ignore exceptions and continue the event loop
 CATCH_ALL_EXCEPTIONS = False
 
+# Log level for debug messages
+LOG_LEVEL = ulogging.INFO
+
 # Enables the micropython WebREPL feature.
 # The password is the first 8 characters (or less) of API_SECRET.
 ENABLE_WEBREPL = False
-
-# Log level for debug messages
-LOG_LEVEL = ulogging.INFO
 
 # =========================================================================
 # ====================== BE CAREFUL ADJUSTING THESE! ======================
