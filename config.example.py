@@ -10,11 +10,11 @@ import ulogging
 
 # TODO: uncomment the correct device below to import a default config. You
 # can override any setting by specifying it again in this file.
-from config.door import *
+from configuration.door import *
 
-# from config.interlock import *
+# from configuration.interlock import *
 
-# from config.memberbucks import *
+# from configuration.memberbucks import *
 
 # =========================================================================
 # =========================== Portal Settings =============================

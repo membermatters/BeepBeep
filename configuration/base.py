@@ -4,8 +4,8 @@ import ulogging
 # ============================== WARNING! =================================
 # =========================================================================
 # Do not change this file to make configuration changes. This is a base
-# config file used for the other config files. Copy config.example.py to
-# config.py and make your changes there.
+# config file used for the other config files. Copy configsetting.example.py
+# to configsetting.py and make your changes there.
 
 
 # =========================================================================
@@ -77,8 +77,8 @@ LCD_ROWS = 2  # number of rows on the LCD display
 # =========================================================================
 # ========================== Pin Configuration ============================
 # =========================================================================
-AUX_1_PIN = 7  # IO num, not pin num
-AUX_2_PIN = 6  # IO num, not pin num
+AUX_1_PIN = 2  # IO num, not pin num
+AUX_2_PIN = 1  # IO num, not pin num
 
 RGB_LED_PIN = 37  # Recommended for interlocks
 STATUS_LED_PIN = 38  # On board status LED
@@ -98,8 +98,8 @@ SCL_PIN = 47  # IO num, not pin num
 UART_RX_PIN = 16  # IO num, not pin num - used if WIEGAND_ENABLED is False
 UART_TX_PIN = 15  # IO num, not pin num - used if WIEGAND_ENABLED is False
 
-WIEGAND_ZERO = 2
-WIEGAND_ONE = 1
+WIEGAND_ZERO = 7
+WIEGAND_ONE = 6
 
 # =========================================================================
 # ========================= Development Settings ==========================
