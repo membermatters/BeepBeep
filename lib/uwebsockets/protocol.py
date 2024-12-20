@@ -2,11 +2,10 @@
 Websockets protocol
 """
 
-import ulogging
+from lib import ulogging
 import ure as re
 import ustruct as struct
 import urandom as random
-import usocket as socket
 from ucollections import namedtuple
 
 LOGGER = ulogging.getLogger(__name__)

@@ -1,6 +1,12 @@
-[submodule "urdm6300"]
-	path = urdm6300
-	url = https://github.com/membermatters/urdm6300.git
 [submodule "micropython-i2c-lcd"]
 	path = micropython-i2c-lcd
+	url = https://github.com/brainelectronics/micropython-i2c-lcd.git
+[submodule "lib/urdm6300"]
+	path = lib/urdm6300
+	url = https://github.com/membermatters/urdm6300.git
+[submodule "lib/uwiegand"]
+	path = lib/uwiegand
+	url = https://github.com/membermatters/uwiegand.git
+[submodule "lib/micropython-i2c-lcd"]
+	path = lib/micropython-i2c-lcd
 	url = https://github.com/brainelectronics/micropython-i2c-lcd.git

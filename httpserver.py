@@ -1,5 +1,5 @@
 import usocket
-import ulogging
+from lib import ulogging
 import config
 
 ulogging.basicConfig(level=config.LOG_LEVEL)

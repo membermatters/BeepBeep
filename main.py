@@ -1,11 +1,11 @@
 import network
 import config
-import ulogging
-import time, utime
+from lib import ulogging
+import time
 from machine import reset
 import ubinascii
 import json
-import uwebsockets.client
+import lib.uwebsockets.client
 import hardware
 import utils
 import gc
@@ -65,7 +65,7 @@ if config.WIEGAND_ENABLED:
         timer_id=config.WIEGAND_TIMER_ID,
     )
 else:
-    from urdm6300.urdm6300 import Rdm6300
+    from lib.urdm6300.urdm6300 import Rdm6300
 
     rfid_reader = Rdm6300(rx=config.UART_RX_PIN, tx=config.UART_TX_PIN)
 
@@ -218,7 +218,7 @@ def connect_websocket():
         hardware.status_led_off()
         hardware.lcd.clear()
         hardware.lcd.print("Connecting WS")
-        websocket = uwebsockets.client.connect(WS_URL)
+        websocket = lib.uwebsockets.client.connect(WS_URL)
         last_pong = time.ticks_ms()
 
         auth_packet = {

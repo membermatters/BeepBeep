@@ -2,11 +2,7 @@
 
 This file briefly documents the MemberMatters Access Device Protocol and how it works.
 
-## Auto discovery
-
-> Due to an unresolved issue, mDNS lookups are currently not functioning correctly in our firmware or test network. Until this is resolved, auto discovery is subject to change.
-
-The MemberMatters server broadcasts an mDNS name of `membermatters.local` and runs a websocket server available at `/ws/access` on port `80` (or `443` if SSL is configured) at this address (e.g. `ws://membermatters.local:80/ws/access`). A device that implements MMADP should attempt to resolve this mDNS address and connect to the websocket server.
+# Note: this document is not up to date and is a work in progress. Once the API stabilises a bit, it will be updated.
 
 ## Packet Structure
 
@@ -38,7 +34,7 @@ This must be the first packet sent to a server after connecting.
 ```json
 {
     "serial": "string",
-    "class": "door" | "interlock"
+    "class": "door" | "interlock" | "memberbucks" 
 }
 ```
 
@@ -63,25 +59,9 @@ Sent from the server when a device is authorised. The device should reply, and t
 - `token` - this is a unique token used to authenticate the device. It should be saved and persisted between power cycles.
 - `name` - the "friendly" name of the device, may be used as a DHCP hostname, etc.
 
-### id_authorised_online (from server)
+### sync (from server)
 
-All id numbers contained in this payload should be authorised to access this device only when it is online. Up to 350 may be sent.
-
-**Command:** `id_authorised_online`
-
-**Payload:**
-
-```json
-[
-    "id_number", ...
-]
-```
-
-- `id_number` - an array of strings that represent authorised id numbers.
-
-### id_authorised_offline (from server)
-
-All id numbers contained in this payload should be authorised to access this device only when offline. Up to 350 may be sent.
+All id numbers contained in this payload should be authorised to access this device. Up to 2000 may be sent.
 
 **Command:** `id_authorised_offline`
 

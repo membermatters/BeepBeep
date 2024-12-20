@@ -1,4 +1,4 @@
-lcd_i2c = __import__("micropython-i2c-lcd.lcd_i2c")
+lcd_i2c = __import__("lib/micropython-i2c-lcd.lcd_i2c")
 
 
 class LcdScreen:

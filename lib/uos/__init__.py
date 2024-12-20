@@ -26,13 +26,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import uarray as array
 import ustruct as struct
 import uctypes
 import errno as errno_
 import stat as stat_
-import uos
-from . import path
 
 from uos2 import *
 from uos2 import _exit, _libc as libc

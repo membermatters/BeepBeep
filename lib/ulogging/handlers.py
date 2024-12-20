@@ -1,5 +1,4 @@
-import uos
-import sys
+from .. import uos
 from . import Handler
 
 

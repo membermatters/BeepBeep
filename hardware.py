@@ -1,10 +1,9 @@
 import config
 import time
-import ulogging
-import urequests
+from lib import ulogging, urequests
 from machine import WDT, Pin, I2C
 from neopixel import NeoPixel
-from ulcdscreen import LcdScreen
+from lcdscreen import LcdScreen
 
 ulogging.basicConfig(level=config.LOG_LEVEL)
 logger = ulogging.getLogger("hardware")
