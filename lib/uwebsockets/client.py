@@ -8,7 +8,7 @@ https://github.com/aaugustin/websockets/blob/master/websockets/client.py
 from lib import ulogging
 import usocket as socket
 import ubinascii as binascii
-import urandom as random
+import random
 import ssl
 
 from .protocol import Websocket, urlparse
@@ -20,6 +20,7 @@ class WebsocketClient(Websocket):
     is_client = True
 
 
+# noinspection HttpUrlsUsage,PyUnresolvedReferences
 def connect(uri):
     """
     Connect a websocket.
@@ -37,10 +38,10 @@ def connect(uri):
     if uri.protocol == "wss":
         sock = ssl.wrap_socket(sock)
 
-    def send_header(header, *args):
+    def send_header(header_bytes: bytes, *args):
         if __debug__:
-            LOGGER.debug(str(header), *args)
-        sock.write(header % args + "\r\n")
+            LOGGER.debug(str(header_bytes), *args)
+        sock.write(header_bytes % args + b"\r\n")
 
     # Sec-WebSocket-Key is 16 bytes of random base64 encoded
     key = binascii.b2a_base64(bytes(random.getrandbits(8) for _ in range(16)))[:-1]

@@ -1,5 +1,3 @@
-import ulogging
-
 # =========================================================================
 # ============================== WARNING! =================================
 # =========================================================================
@@ -11,9 +9,7 @@ import ulogging
 # TODO: uncomment the correct device below to import a default config. You
 # can override any setting by specifying it again in this file.
 from configuration.door import *
-
 # from configuration.interlock import *
-
 # from configuration.memberbucks import *
 
 # =========================================================================
