@@ -2,11 +2,11 @@
 
 BeepBeep (named from all the beeping sounds it makes!) is a custom designed PCB and firmware that provides access control. It seamlessly integrates with MemberMatters and allows enabling access control of a door, tool/appliance, or any vending machine that uses a vend relay.
 
-<img src="./hardware/v1.0.1/3D_BeepBeep%20PCB_v1.0.1_2024-05-27.png" width="200px">
+<img src="./src-hardware/v1.0.1/3D_BeepBeep%20PCB_v1.0.1_2024-05-27.png" width="200px">
 
 ## Warning
 
-The hardware and software is in Beta. It may be used with caution, but occasional bugs should be expected.
+The hardware and software is in Alpha. It may be used with caution, but occasional bugs should be expected.
 
 Before ordering any hardware, you should review the designs and check that they will meet your requirements. We strongly recommend that you order and build a very small batch (1 or 2 devices) to start with. Once you are happy that BeepBeep will meet your needs, only then should you order a larger batch.
 
@@ -21,8 +21,8 @@ The following configuration is currently supported:
 - [BeepBeep v1.0.1 PCB](/hardware/v1.0.1/)
     - You can view the OSHWLAB page [here](https://oshwlab.com/member-matters/beepbeep).
     - It is recommended to order boards from JLCPCB using their SMT assembly service.
-- BeepBeep v1.x.x firmware
-- Micropython v1.22.0
+- BeepBeep v2.x.x firmware
+- Micropython v1.27.0
 
 ## Getting Started
 
@@ -42,8 +42,7 @@ The first step is to install Micropython onto your ESP32 board. A full tutorial 
 
 4. Flash the Micropython binary you downloaded earlier by using:
    ```bash
-   esptool.py --chip esp32s3 --port /dev/tty.usbserial-210 write_flash -z 0 ESP32_GENERIC_S3-20231227-v1.22.0.bin
+   esptool.py --chip esp32s3 --port /dev/tty.usbserial-210 write_flash -z 0 ESP32_GENERIC_S3-20251209-v1.27.0.bin
    ```
 
-5. Update `config.py` with the correct config for your setup then flash the software to your board using the VS Code plugin "pymakr". Alternatively, use another tool like "ampy".
-   NOTE: You can find a list of files to exclude in the `pymakr.conf` file or just use pymakr which automatically does this for you.
+5. Update `config.py` with the correct config for your setup then flash the software to your board using the VS Code plugin "MicroPico". Alternatively, use another tool like "ampy". All files inside the `src-firmware` folder should be uploaded.
