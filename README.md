@@ -28,6 +28,8 @@ The following configuration is currently supported:
 
 The first step is to install Micropython onto your ESP32 board. A full tutorial on how to do this is outside the scope of this document, but some quick steps for reference are included below.
 
+> Don't forget to clone the sub modules too with: `git submodule update --init --recursive`
+
 1. [Install esptool.py](https://pypi.org/project/esptool/) and download the [appropriate version of Micropython](https://micropython.org/download/ESP32_GENERIC_S3/) for your ESP32-S3 board.
 
 2. Connect your ESP32 board using a USB serial adapter.
