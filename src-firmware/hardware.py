@@ -52,17 +52,17 @@ else:
     lcd = LcdScreen(i2c, i2c_address=None)
 
 # setup other pins
-buzzer = None
-reader_led = None
-lock_pin = None
-relay_pin = None
-door_sensor_pin = None
-status_led_pin = None
-in_1_pin = None
-out_1_pin = None
-aux_1_pin = None
-aux_2_pin = None
-rgb_led_pin = None
+buzzer: None | Pin = None
+reader_led: None | Pin = None
+lock_pin: None | Pin = None
+relay_pin: None | Pin = None
+door_sensor_pin: None | Pin = None
+status_led_pin: None | Pin = None
+in_1_pin: None | Pin = None
+out_1_pin: None | Pin = None
+aux_1_pin: None | Pin = None
+aux_2_pin: None | Pin = None
+rgb_led_pin: None | NeoPixel = None
 
 if config.READER_BUZZER_PIN:
     buzzer = Pin(config.READER_BUZZER_PIN, Pin.OUT)
@@ -122,7 +122,7 @@ RGB_PINK = (0, 200, 50)
 
 
 def rgb_led_set(colour):
-    if config.RGB_LED_PIN:
+    if config.RGB_LED_PIN and rgb_led_pin:
         logger.debug(f"Setting RGB LED to {colour}")
         for x in range(config.RGB_LED_COUNT):
             rgb_led_pin[x] = colour
@@ -157,23 +157,25 @@ def rgb_led_set_colourwheel():
 def lock():
     rgb_led_set(RGB_BLUE)  # blue is standby
     led_off()
-    if config.LOCK_REVERSED:
-        lock_pin.on()
-    else:
-        lock_pin.off()
+    if lock_pin:
+        if config.LOCK_REVERSED:
+            lock_pin.on()
+        else:
+            lock_pin.off()
 
 
 def unlock():
     rgb_led_set(RGB_GREEN)  # green is unlocked
     led_on()
-    if config.LOCK_REVERSED:
-        lock_pin.off()
-    else:
-        lock_pin.on()
+    if lock_pin:
+        if config.LOCK_REVERSED:
+            lock_pin.off()
+        else:
+            lock_pin.on()
 
 
 def led_on():
-    if config.READER_LED_PIN:
+    if config.READER_LED_PIN and reader_led:
         if config.READER_LED_REVERSED:
             reader_led.off()
         else:
@@ -184,7 +186,7 @@ def led_on():
 
 
 def led_off():
-    if config.READER_LED_PIN:
+    if config.READER_LED_PIN and reader_led:
         if config.READER_LED_REVERSED:
             reader_led.on()
         else:
@@ -195,7 +197,7 @@ def led_off():
 
 
 def buzzer_on():
-    if config.BUZZER_ENABLED:
+    if config.BUZZER_ENABLED and buzzer:
         if config.BUZZER_REVERSED:
             buzzer.off()
         else:
@@ -275,17 +277,19 @@ tasmota_base_url = f"http://{config.TASMOTA_HOST}/cm?user={config.TASMOTA_USER}&
 def reset_interlock_power_usage() -> bool:
     if config.TASMOTA_HOST:
         logger.debug("Resetting power usage from remote interlock!")
-        r = urequests.get(
+        urequests.get(
             tasmota_base_url + "Backlog%20EnergyToday%200%3B%20EnergyTotal%200%3B"
         )
         return True
+    else:
+        return False
 
 
 def interlock_power_control(status: bool) -> bool:
     if status:
         if config.TASMOTA_HOST:
             logger.info("Trying to turn ON remote interlock!")
-            r = urequests.get(tasmota_base_url + f"Power%20On")
+            r = urequests.get(tasmota_base_url + "Power%20On")
             return True
 
         else:
@@ -295,7 +299,7 @@ def interlock_power_control(status: bool) -> bool:
     else:
         if config.TASMOTA_HOST:
             logger.info("Trying to turn OFF remote interlock!")
-            r = urequests.get(tasmota_base_url + f"Power%20Off")
+            r = urequests.get(tasmota_base_url + "Power%20Off")
             return True
 
         else:
@@ -309,63 +313,71 @@ def get_interlock_power_usage() -> float | None:
         r = urequests.get(tasmota_base_url + "EnergyTotal")
         return float(r.json()["EnergyTotal"]["Total"])
     else:
-        None
+        return None
 
 
 def relay_on():
-    if config.RELAY_REVERSED:
-        relay_pin.off()
-    else:
-        relay_pin.on()
+    if relay_pin:
+        if config.RELAY_REVERSED:
+            relay_pin.off()
+        else:
+            relay_pin.on()
 
 
 def relay_off():
-    if config.RELAY_REVERSED:
-        relay_pin.on()
-    else:
-        relay_pin.off()
+    if relay_pin:
+        if config.RELAY_REVERSED:
+            relay_pin.on()
+        else:
+            relay_pin.off()
 
 
 def out_1_on():
-    if config.OUT_1_REVERSED:
-        out_1_pin.off()
-    else:
-        out_1_pin.on()
+    if out_1_pin:
+        if config.OUT_1_REVERSED:
+            out_1_pin.off()
+        else:
+            out_1_pin.on()
 
 
 def out_1_off():
-    if config.RELAY_REVERSED:
-        relay_pin.on()
-    else:
-        relay_pin.off()
+    if out_1_pin:
+        if config.OUT_1_REVERSED:
+            out_1_pin.on()
+        else:
+            out_1_pin.off()
 
 
 def get_door_sensor_state():
-    if config.DOOR_SENSOR_REVERSED:
-        return not door_sensor_pin.value()
-    else:
-        return door_sensor_pin.value()
+    if door_sensor_pin:
+        if config.DOOR_SENSOR_REVERSED:
+            return not door_sensor_pin.value()
+        else:
+            return door_sensor_pin.value()
 
 
 def get_in_1_state():
-    if config.IN_1_REVERSED:
-        return not in_1_pin.value()
-    else:
-        return in_1_pin.value()
+    if in_1_pin:
+        if config.IN_1_REVERSED:
+            return not in_1_pin.value()
+        else:
+            return in_1_pin.value()
 
 
 def get_aux_1_state():
-    if config.AUX_1_REVERSED:
-        return not aux_1_pin.value()
-    else:
-        return aux_1_pin.value()
+    if aux_1_pin:
+        if config.AUX_1_REVERSED:
+            return not aux_1_pin.value()
+        else:
+            return aux_1_pin.value()
 
 
 def get_aux_2_state():
-    if config.AUX_2_REVERSED:
-        return not aux_2_pin.value()
-    else:
-        return aux_2_pin.value()
+    if aux_2_pin:
+        if config.AUX_2_REVERSED:
+            return not aux_2_pin.value()
+        else:
+            return aux_2_pin.value()
 
 
 def vend_product():
@@ -375,9 +387,6 @@ def vend_product():
         buzz_action()
 
     if config.VEND_MODE == "toggle":
-        # TODO: timeout after 60 seconds and refund the money
-        # currently we will wait forever for the accept coins signal to go low
-        # even if a drink is never vended.
         relay_on()
         unlock()
         start_time = time.time()
@@ -385,7 +394,7 @@ def vend_product():
             time.sleep(0.1)
             feedWDT()
         relay_off()
-        lock()
+
     elif config.VEND_MODE == "hold":
         relay_on()
         unlock()
@@ -396,7 +405,6 @@ def vend_product():
         while get_in_1_state():
             time.sleep(0.1)
         relay_off()
-        lock()
 
     rgb_led_set(RGB_BLUE)
     led_off()
