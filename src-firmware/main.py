@@ -1,17 +1,18 @@
 import network
 import config
-import ulogging
-import time, utime
+import ulogging as ulogging
+import time
+import utime
 from machine import reset
 import ubinascii
 import json
 import uwebsockets.client
-import hardware
-import utils
+import hardware as hardware
+import utils as utils
 import gc
 
 if config.ENABLE_BACKUP_HTTP_SERVER:
-    import httpserver
+    import httpserver as httpserver
 
 ulogging.basicConfig(level=config.LOG_LEVEL)
 logger = ulogging.getLogger("main")
@@ -56,7 +57,7 @@ door_opened_time = None
 # setup RFID
 if config.WIEGAND_ENABLED:
     # setup wiegand reader
-    import uwiegand
+    import uwiegand as uwiegand
 
     rfid_reader = uwiegand.Wiegand(
         config.WIEGAND_ZERO,

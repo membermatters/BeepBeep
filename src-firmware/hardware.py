@@ -1,7 +1,7 @@
 import config
 import time
-import ulogging
-import urequests
+import ulogging as ulogging
+import urequests as urequests
 from machine import WDT, Pin, I2C
 from neopixel import NeoPixel
 from ulcdscreen import LcdScreen

@@ -1,4 +1,4 @@
-import uos
+import uos as uos
 import sys
 from . import Handler
 

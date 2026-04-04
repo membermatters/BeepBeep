@@ -1,0 +1,10 @@
+[project]
+name = "beepbeep"
+version = "2.0.0alpha"
+description = "BeepBeep seamlessly integrates with MemberMatters and allows access control of a door, tool/appliance, or any vending machine that uses a vend relay."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.ruff]
+src = ["src-firmware"]

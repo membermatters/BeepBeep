@@ -31,7 +31,7 @@ import ustruct as struct
 import uctypes
 import errno as errno_
 import stat as stat_
-import uos
+import uos as uos
 from . import path
 
 from uos2 import *
