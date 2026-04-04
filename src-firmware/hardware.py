@@ -110,15 +110,22 @@ def status_led_off():
         status_led_pin.off()
 
 
-# WS2812 uses GRB instead of RGB!
-RGB_OFF = (0, 0, 0)
-RGB_WHITE = (255, 255, 255)
-RGB_RED = (0, 255, 0)
-RGB_GREEN = (255, 0, 0)
-RGB_BLUE = (0, 0, 255)
-RGB_YELLOW = (255, 255, 0)
-RGB_PURPLE = (0, 130, 130)
-RGB_PINK = (0, 200, 50)
+class Colour:
+    # WS2812 uses GRB instead of RGB!
+    RGB_OFF = (0, 0, 0)
+    RGB_WHITE = (255, 255, 255)
+    RGB_RED = (0, 255, 0)
+    RGB_GREEN = (255, 0, 0)
+    RGB_BLUE = (0, 0, 255)
+    RGB_YELLOW = (255, 255, 0)
+    RGB_PURPLE = (0, 130, 130)
+    RGB_PINK = (0, 200, 50)
+
+    SETUP = RGB_PURPLE
+    IDLE = RGB_BLUE
+    UNLOCKED = RGB_GREEN
+    ALERT = RGB_RED
+    ALERT_OK = RGB_GREEN
 
 
 def rgb_led_set(colour):
@@ -155,7 +162,7 @@ def rgb_led_set_colourwheel():
 
 
 def lock():
-    rgb_led_set(RGB_BLUE)  # blue is standby
+    rgb_led_set(Colour.IDLE)  # blue is standby
     led_off()
     if lock_pin:
         if config.LOCK_REVERSED:
@@ -165,7 +172,7 @@ def lock():
 
 
 def unlock():
-    rgb_led_set(RGB_GREEN)  # green is unlocked
+    rgb_led_set(Colour.UNLOCKED)  # green is unlocked
     led_on()
     if lock_pin:
         if config.LOCK_REVERSED:
@@ -212,10 +219,10 @@ def buzzer_off():
             buzzer.off()
 
 
-def alert(rgb_return_colour=RGB_BLUE):
+def alert(rgb_return_colour=Colour.IDLE):
     buzzer_on()
     led_on()
-    rgb_led_set(RGB_RED)
+    rgb_led_set(Colour.ALERT)
     time.sleep(0.3)
 
     buzzer_off()
@@ -225,7 +232,7 @@ def alert(rgb_return_colour=RGB_BLUE):
 
     buzzer_on()
     led_on()
-    rgb_led_set(RGB_RED)
+    rgb_led_set(Colour.ALERT)
     time.sleep(0.3)
 
     buzzer_off()
@@ -237,13 +244,13 @@ def buzz_ok(flash_led=True):
     buzzer_on()
     if flash_led:
         led_on()
-        rgb_led_set(RGB_GREEN)
+        rgb_led_set(Colour.ALERT_OK)
 
     time.sleep(1)
 
     if flash_led:
         led_off()
-        rgb_led_set(RGB_BLUE)
+        rgb_led_set(Colour.IDLE)
     buzzer_off()
 
 
@@ -260,13 +267,13 @@ def buzz_action():
 
 
 def interlock_session_started():
-    rgb_led_set(RGB_GREEN)
+    rgb_led_set(Colour.UNLOCKED)
     led_on()
     buzz_action()
 
 
 def interlock_session_ended():
-    rgb_led_set(RGB_BLUE)
+    rgb_led_set(Colour.IDLE)
     led_off()
     # buzz_action()
 
@@ -381,7 +388,7 @@ def get_aux_2_state():
 
 
 def vend_product():
-    rgb_led_set(RGB_GREEN)
+    rgb_led_set(Colour.UNLOCKED)
     led_on()
     if config.BUZZ_ON_SWIPE:
         buzz_action()
@@ -406,5 +413,5 @@ def vend_product():
             time.sleep(0.1)
         relay_off()
 
-    rgb_led_set(RGB_BLUE)
+    rgb_led_set(Colour.IDLE)
     led_off()
