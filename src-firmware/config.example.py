@@ -37,7 +37,7 @@ WIFI_PASS = "444422224444"
 # ========================== Buzzer Settings ==============================
 # =========================================================================
 BUZZER_ENABLED = True
-BUZZ_ON_SWIPE = True  # send a short buzz when a card is swiped
+BUZZ_ON_SWIPE = False  # send a short buzz when a card is swiped
 
 # =========================================================================
 # ========================= Development Settings ==========================

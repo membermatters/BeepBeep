@@ -1,6 +1,8 @@
+import asyncio
+import time
+
 import machine
 import neopixel
-import time
 
 GAMMA_CORRECTION = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
@@ -28,14 +30,11 @@ OFF = (0, 0, 0)
 
 
 class Leds:
+    """Drive an addressable LED strip and maintain cooperative animation state."""
     neopixel = None
 
-    def __init__(self, pin=16, number=12):
-        """[Initialise the LED driver]
-        Args:
-            pin ([type]): [The pin to drive the addressable LEDs from.]
-            number ([type]): [The number of LEDs connected.]
-        """
+    def __init__(self, pin: int = 16, number: int = 12) -> None:
+        """Create a strip of number LEDs on the given GPIO and switch them off."""
         self.pin = pin
         self.number_leds = number
         self.loop_speed = 60  # in ms
@@ -49,21 +48,18 @@ class Leds:
         self.animate_direction = 0
 
         self.leds = neopixel.NeoPixel(machine.Pin(self.pin), self.number_leds)
-        self.clear()
-
-    def clear(self):
-        """[Set every LED to off.]"""
         for i in range(self.number_leds):
             self.leds[i] = OFF
         self.leds.write()
 
-    def set_all(self, colour):
-        """[Set every LED to the specified RGB colour.]
-        Args:
-            r ([integer]): [Red value 0-255]
-            g ([integer]): [Green value 0-255]
-            b ([integer]): [Blue value 0-255]
-        """
+    async def clear(self) -> None:
+        """Switch off every LED and write the buffer to the strip."""
+        for i in range(self.number_leds):
+            self.leds[i] = OFF
+        self.leds.write()
+
+    async def set_all(self, colour: tuple[int, int, int]) -> None:
+        """Gamma-correct an RGB tuple of values 0-255 and write it to every LED."""
         r, g, b = GAMMA_CORRECTION[colour[0]
                                    ], GAMMA_CORRECTION[colour[1]], GAMMA_CORRECTION[colour[2]]
 
@@ -71,61 +67,54 @@ class Leds:
             self.leds[i] = (r, g, b)
         self.leds.write()
 
-    def set_channel(self, channel, colour, write=True):
-        """[Set the channel's LED to the specified RGB colour.]
-        Args:
-            channel ([integer]): [The channel to set]
-            r ([tuple]): [Red, green and blue values 0-255 (r, g, b)]
-        """
+    async def set_channel(
+        self, channel: int, colour: tuple[int, int, int], write: bool = True,
+    ) -> None:
+        """Set one zero-based LED to a raw RGB tuple, optionally writing it now."""
         channel = int(channel)
         self.leds[channel] = colour
         if write:
-            self.write()
+            await self.write()
 
-    def write(self):
+    async def write(self) -> None:
+        """Flush the buffered pixel values to the strip without an async delay."""
         self.leds.write()
 
-    def run_single_loop(self, colour, times=1):
-        """[Blocking single LED loop]
+    async def run_single_loop(self, colour: tuple[int, int, int], times: int = 1) -> None:
+        """Move one lit LED around the strip times times, then clear the strip.
 
-        Args:
-            colour ([colour enum]): []
-            times (int, optional): [number of times to loop]. Defaults to 1.
+        Yield for loop_speed milliseconds between pixels.
         """
         for i in range(times):
             for x in range(self.number_leds):
-                self.clear()
-                self.set_channel(x, colour)
-                time.sleep_ms(self.loop_speed)
-        self.clear()
+                await self.clear()
+                await self.set_channel(x, colour)
+                await asyncio.sleep_ms(self.loop_speed)
+        await self.clear()
 
-    def run_single_wipe(self, colour, times=1):
-        """[Blocking single LED wipe]
-
-        Args:
-            colour ([colour enum]): []
-            times (int, optional): [number of times to loop]. Defaults to 1.
-        """
+    async def run_single_wipe(self, colour: tuple[int, int, int], times: int = 1) -> None:
+        """Fill and clear the strip times times, yielding between pixel updates."""
         for i in range(times):
             for x in range(self.number_leds):
-                self.set_channel(x, colour)
-                time.sleep_ms(self.loop_speed)
+                await self.set_channel(x, colour)
+                await asyncio.sleep_ms(self.loop_speed)
 
             for x in range(self.number_leds):
-                self.set_channel(x, OFF)
-                time.sleep_ms(self.loop_speed)
-        self.clear()
+                await self.set_channel(x, OFF)
+                await asyncio.sleep_ms(self.loop_speed)
+        await self.clear()
 
-    def run_single_pulse(self, colour, times=1, fadein=False, fadeout=False):
-        """[Blocking single LED pulse]
+    async def run_single_pulse(
+        self, colour: tuple[int, int, int], times: int = 1,
+        fadein: bool = False, fadeout: bool = False,
+    ) -> None:
+        """Repeat the selected fade directions for a module colour constant.
 
-        Args:
-            colour ([colour enum]): []
-            times (int, optional): [number of times to loop]. Defaults to 1.
-            fadein (bool, optional): only fade in
+        Yield for pulse_speed milliseconds per brightness step and clear the
+        strip at the end. With neither direction selected, only clear the strip.
         """
         for i in range(times):
-            range_list = list()
+            range_list = []
             if fadein:
                 range_list += list(range(self.min_pulse_brightness, 255))
 
@@ -133,35 +122,34 @@ class Leds:
                 range_list += list(reversed(range(self.min_pulse_brightness, 255)))
 
             for x in range_list:
-                time.sleep_ms(self.pulse_speed)
+                await asyncio.sleep_ms(self.pulse_speed)
                 x = GAMMA_CORRECTION[x]
-                self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
+                await self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
                               GREEN or colour == YELLOW else 0, x if colour == BLUE or colour == PURPLE else 0))
-        self.clear()
+        await self.clear()
 
-    def start_animation(self, animation, colour):
-        """Starts a non blocking animation.
+    async def start_animation(self, animation: str, colour: tuple[int, int, int]) -> None:
+        """Select a loop, wipe or pulse animation using a module colour constant.
 
-        Args:
-            animation (string): The animation to start (from "loop", "wipe" and "pulse")
-            colour (COLOUR): A colour defined in leds.py
+        Call update_animation() periodically to advance it; no task is created.
         """
         self.animate_mode = animation
         self.animate_colour = colour
 
-    def end_animation(self):
-        """Stops the animation and reset default state values.
-        """
+    async def end_animation(self) -> None:
+        """Stop the animation, reset its position and brightness, and clear LEDs."""
         self.animate_mode = ""
         self.animate_colour = ""
         self.animate_last_update = time.ticks_ms()
         self.animate_brightness = 0
         self.animate_position = 0
         self.animate_direction = 0
-        self.set_all(OFF)
+        await self.set_all(OFF)
 
-    def update_animation(self):
-        """Updates the LEDs based on the current animation state.
+    async def update_animation(self) -> None:
+        """Advance the selected animation by one step when its interval elapses.
+
+        An empty or unknown animation mode resets the animation and clears LEDs.
         """
         if self.animate_mode == "loop":
             # if it's time to update the animation
@@ -169,12 +157,12 @@ class Leds:
                 self.animate_last_update = time.ticks_ms()
 
                 if self.animate_position == 0:
-                    self.set_channel(self.number_leds-1, OFF)
+                    await self.set_channel(self.number_leds-1, OFF)
                 else:
-                    self.set_channel(self.animate_position - 1, OFF)
+                    await self.set_channel(self.animate_position - 1, OFF)
 
                 if self.animate_position < self.number_leds:
-                    self.set_channel(self.animate_position,
+                    await self.set_channel(self.animate_position,
                                      self.animate_colour)
 
                 self.animate_position += 1
@@ -191,7 +179,7 @@ class Leds:
                 self.animate_last_update = time.ticks_ms()
 
                 if self.animate_direction == 0:
-                    self.set_channel(self.animate_position,
+                    await self.set_channel(self.animate_position,
                                      self.animate_colour)
                     self.animate_position += 1
 
@@ -200,7 +188,7 @@ class Leds:
                         self.animate_position = 0
 
                 else:
-                    self.set_channel(self.animate_position, OFF)
+                    await self.set_channel(self.animate_position, OFF)
                     self.animate_position += 1
 
                     if self.animate_position == self.number_leds:
@@ -216,15 +204,13 @@ class Leds:
 
                 colour = self.animate_colour
 
-                if (self.animate_brightness > 255):
-                    self.animate_brightness = 255
-                if (self.animate_brightness < self.min_pulse_brightness):
-                    self.animate_brightness = self.min_pulse_brightness
+                self.animate_brightness = min(self.animate_brightness, 255)
+                self.animate_brightness = max(self.animate_brightness, self.min_pulse_brightness)
 
                 x = GAMMA_CORRECTION[self.animate_brightness]
 
                 if self.animate_direction == 0:
-                    self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
+                    await self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
                                   GREEN or colour == YELLOW else 0, self.animate_brightness if colour == BLUE or colour == PURPLE else 0))
                     self.animate_brightness += 1
 
@@ -232,7 +218,7 @@ class Leds:
                         self.animate_direction = 1
 
                 else:
-                    self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
+                    await self.set_all((x if colour == RED or colour == PURPLE or colour == YELLOW else 0, x if colour ==
                                   GREEN or colour == YELLOW else 0, self.animate_brightness if colour == BLUE or colour == PURPLE else 0))
                     self.animate_brightness -= 1
 
@@ -242,17 +228,18 @@ class Leds:
             return
 
         else:
-            self.end_animation()
+            await self.end_animation()
 
-    def animate_idle(self):
-        """Starts the default slow blue pulse animation.
-        """
-        self.start_animation("pulse", BLUE)
+    async def animate_idle(self) -> None:
+        """Select a slow blue pulse for subsequent update_animation() calls."""
+        await self.start_animation("pulse", BLUE)
         self.pulse_speed = 25
         self.min_pulse_brightness = 180
 
-    def animate_defaults(self):
-        """Sets the animation state back to default, but keeps the animation type/colour
+    async def animate_defaults(self) -> None:
+        """Restore default speeds, minimum brightness and forward direction.
+
+        Keep the current animation mode, colour, position and brightness.
         """
         self.loop_speed = 60  # in ms
         self.pulse_speed = 3

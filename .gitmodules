@@ -2,8 +2,11 @@
 	path = urdm6300
 	url = https://github.com/membermatters/urdm6300.git
 [submodule "micropython-i2c-lcd"]
-	path = micropython-i2c-lcd
+	path = src-firmware/micropython-i2c-lcd
 	url = https://github.com/brainelectronics/micropython-i2c-lcd.git
 [submodule "src-firmware/urdm6300"]
 	path = src-firmware/urdm6300
 	url = git@github.com:membermatters/urdm6300.git
+[submodule "src-firmware/src/micropython_async_websocket_client"]
+	path = src-firmware/micropython_async_websocket_client
+	url = https://github.com/Vovaman/micropython_async_websocket_client.git

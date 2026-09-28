@@ -1,7 +1,8 @@
 import os
 
 
-def file_or_dir_exists(filename):
+def file_or_dir_exists(filename: str) -> bool:
+    """Return whether stat succeeds, printing a diagnostic for any OSError."""
     try:
         os.stat(filename)
         return True

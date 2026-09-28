@@ -1,11 +1,12 @@
-import ulogging as ulogging
+import ulogging
+from models import DeviceType
 
 # =========================================================================
 # ============================== WARNING! =================================
 # =========================================================================
 # Do not change this file to make configuration changes. This is a base
-# config file used for the other config files. Copy configsetting.example.py
-# to configsetting.py and make your changes there.
+# config file used for the other config files. Copy config.example.py
+# to config.py and make your changes there.
 
 
 # =========================================================================
@@ -27,19 +28,19 @@ WIFI_PASS = "12345678"
 # =========================================================================
 # ========================== General Settings =============================
 # =========================================================================
-DEVICE_TYPE = "door"  # "door", "interlock" or "memberbucks"
+DEVICE_TYPE = DeviceType.DOOR
 LOCK_REVERSED = False
 READER_LED_REVERSED = True
 RELAY_REVERSED = False
 DOOR_SENSOR_REVERSED = True
 DOOR_SENSOR_ENABLED = True
 DOOR_SENSOR_TIMEOUT = 5  # seconds to wait for the door to open before locking again
-DOOR_OPEN_ALARM_TIMEOUT = None  # seconds to wait for the door to close before alarming
 OUT_1_REVERSED = False
 IN_1_REVERSED = True
 AUX_1_REVERSED = False
 AUX_2_REVERSED = False
 FIXED_UNLOCK_DELAY = 7  # seconds to remain unlocked
+BUMP_DELAY = 10  # seconds to wait after unlocking before locking during a bump
 RGB_LED_COUNT = 1  # number of LEDs in the strip
 WIEGAND_ENABLED = True
 
@@ -48,7 +49,7 @@ WIEGAND_ENABLED = True
 # =========================================================================
 BUZZER_ENABLED = True
 BUZZER_REVERSED = True
-BUZZ_ON_SWIPE = True  # send a short buzz when a card is swiped
+BUZZ_ON_SWIPE = False  # send a short buzz when a card is swiped - most readers already do this
 ACTION_BUZZ_DELAY = 2  # seconds to buzz for an action (unlock, lock, etc)
 
 # =========================================================================
@@ -105,10 +106,10 @@ WIEGAND_ONE = 6
 # ========================= Development Settings ==========================
 # =========================================================================
 # Enables the hardware watchdog timer.
-ENABLE_WDT = False
+ENABLE_WDT = True
 
 # Ignore exceptions and continue the event loop
-CATCH_ALL_EXCEPTIONS = False
+CATCH_ALL_EXCEPTIONS = True
 
 # Log level for debug messages
 LOG_LEVEL = ulogging.INFO
@@ -120,9 +121,6 @@ ENABLE_WEBREPL = False
 # =========================================================================
 # ====================== BE CAREFUL ADJUSTING THESE! ======================
 # =========================================================================
-# Enables the backup HTTP server. May be less secure and impact reliability.
-ENABLE_BACKUP_HTTP_SERVER = False
-
 # Set True for full 32bit mifare UIDs or False for 24bit mifare UIDs
 UID_32BIT_MODE = True
 

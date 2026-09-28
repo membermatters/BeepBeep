@@ -2,11 +2,26 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"name": "serial://dev/tty.usbserial-10",
-			"uri": "serial://%2fdev%2ftty.usbserial-10/"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"micropico.softResetAfterUpload": true,
+		"micropico.alwaysStopRunningProgram": true,
+		"micropico.openOnStart": true,
+		"micropico.syncFolder": "src-firmware",
+		"micropico.syncAllFileTypes": false,
+		"micropico.syncFileTypes": [
+			"py",
+			"mpy"
+		],
+		"micropico.pyIgnore": [
+			"**/tests",
+			"**/docs",
+			"**/examples",
+			"config.example.py",
+			"micropython-i2c-lcd/setup.py",
+			"micropython-i2c-lcd/sdist_upip.py",
+			"micropython-i2c-lcd/create_report_dirs.py"
+		]
+	}
 }

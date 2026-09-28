@@ -1,9 +1,8 @@
 {
     "recommendations": [
-        "pycom.pymakr-preview",
+        "paulober.pico-w-go",
         "ms-python.python",
         "visualstudioexptteam.vscodeintellicode",
-        "ms-python.vscode-pylance",
-        "paulober.pico-w-go"
+        "ms-python.vscode-pylance"
     ]
 }

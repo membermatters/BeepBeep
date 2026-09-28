@@ -5,13 +5,14 @@
         "reportMissingModuleSource": "none"
     },
     "python.terminal.activateEnvironment": false,
-    "micropico.openOnStart": true,
     "python.analysis.typeshedPaths": [
         "~/.micropico-stubs/included"
     ],
     "python.analysis.extraPaths": [
-        "~/.micropico-stubs/included"
-    ],
-    "micropico.syncFolder": "src-firmware",
-    "micropico.softResetAfterUpload": true
+        "~/.micropico-stubs/included",
+        "./src-firmware/urdm6300",
+        "./src-firmware",
+        "./src-firmware/micropython_async_websocket_client",
+        "./src-firmware/micropython-i2c-lcd"
+    ]
 }

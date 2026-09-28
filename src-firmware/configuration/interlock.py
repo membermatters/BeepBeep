@@ -1,16 +1,17 @@
 from configuration.base import *
+from models import DeviceType
 
 # =========================================================================
 # ============================== WARNING! =================================
 # =========================================================================
 # Do not change this file to make configuration changes. This is a base
-# config file used for the other config files. Copy configsetting.example.py
-# to configsetting.py and make your changes there.
+# config file used for the other config files. Copy config.example.py
+# to config.py and make your changes there.
 
 # =========================================================================
 # ========================== General Settings =============================
 # =========================================================================
-DEVICE_TYPE = "interlock"  # "door", "interlock" or "memberbucks"
+DEVICE_TYPE = DeviceType.INTERLOCK
 LOCK_REVERSED = False
 RELAY_REVERSED = False
 IN_1_REVERSED = True

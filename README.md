@@ -30,6 +30,10 @@ The first step is to install Micropython onto your ESP32 board. A full tutorial 
 
 > Don't forget to clone the sub modules too with: `git submodule update --init --recursive`
 
+The LCD driver is included as a submodule at `src-firmware/micropython-i2c-lcd`. Upload the contents of `src-firmware` to the device root, including the populated submodule, so the device has `/main.py` and `/micropython-i2c-lcd/lcd_i2c`. No on-device package installation is needed.
+
+The [async WebSocket client](https://github.com/Vovaman/micropython_async_websocket_client) is included as a submodule at `src-firmware/micropython_async_websocket_client`. Include its `async_websocket_client` directory when uploading; `/main.py` adds the submodule to the import path. WebSocket handshakes and message handling use its async API, with the existing JSON authentication and heartbeat protocol.
+
 1. [Install esptool.py](https://pypi.org/project/esptool/) and download the [appropriate version of Micropython](https://micropython.org/download/ESP32_GENERIC_S3/) for your ESP32-S3 board.
 
 2. Connect your ESP32 board using a USB serial adapter.
@@ -44,7 +48,7 @@ The first step is to install Micropython onto your ESP32 board. A full tutorial 
 
 4. Flash the Micropython binary you downloaded earlier by using:
    ```bash
-   esptool.py --chip esp32s3 --port /dev/tty.usbserial-210 write_flash -z 0 ESP32_GENERIC_S3-20251209-v1.27.0.bin
+   esptool.py --chip esp32s3 --port /dev/tty.usbserial-210 write_flash -z 0 /ESP32_GENERIC_S3-20260824-v1.29.0.bin
    ```
 
 5. Update `config.py` with the correct config for your setup then flash the software to your board using the VS Code plugin "MicroPico". Alternatively, use another tool like "ampy". All files inside the `src-firmware` folder should be uploaded.

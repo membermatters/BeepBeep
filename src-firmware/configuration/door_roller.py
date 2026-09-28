@@ -11,14 +11,11 @@ from models import DeviceType
 # =========================================================================
 # ========================== General Settings =============================
 # =========================================================================
-DEVICE_TYPE = DeviceType.MEMBERBUCKS
+DEVICE_TYPE = DeviceType.DOOR_ROLLER
+LCD_ENABLE = False
 LOCK_REVERSED = False
 RELAY_REVERSED = False
-
-# =========================================================================
-# ========================== Vending Settings =============================
-# =========================================================================
-VEND_PRICE = 250  # price in cents to debit an account
-# None, "hold" or "toggle" - None disable, hold until the accept coins signal is ready, toggle will hold for VEND_TOGGLE_TIME (s)
-VEND_MODE = "hold"
-VEND_TOGGLE_TIME = 1
+DOOR_SENSOR_REVERSED = True
+DOOR_SENSOR_ENABLED = False
+DOOR_SENSOR_TIMEOUT = 10  # seconds to wait for the door to open before locking again
+FIXED_UNLOCK_DELAY = 10  # seconds to remain unlocked
